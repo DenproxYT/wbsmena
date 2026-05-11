@@ -1,0 +1,143 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container mt-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="mb-0">Управление учебными материалами</h2>
+    <a href="/training/" class="btn btn-link">← Назад к обучению</a>
+  </div>
+
+  <div class="row">
+    <div class="col-md-5">
+      <div class="card mb-4 shadow-sm">
+        <div class="card-header">
+          <strong>Добавить новый материал</strong>
+        </div>
+        <div class="card-body">
+          <form method="post" enctype="multipart/form-data">
+            {% csrf_token %}
+
+            <div class="mb-3">
+              <label class="form-label">Модуль (группа материалов)</label>
+              <input
+                type="text"
+                name="module_title"
+                class="form-control"
+                value="Как работать с программой WB PVZ"
+              >
+              <small class="form-text text-muted">
+                Например: «Как работать с программой WB PVZ».
+              </small>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">Название материала</label>
+              <input
+                type="text"
+                name="title"
+                class="form-control"
+                required
+                placeholder="Инструкция по приемке товара"
+              >
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">Описание / подводка</label>
+              <textarea
+                name="description"
+                rows="3"
+                class="form-control"
+                placeholder="Кратко опишите, о чём эта инструкция"
+              ></textarea>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">PDF файл (опционально)</label>
+              <input
+                type="file"
+                name="pdf_file"
+                class="form-control"
+                accept="application/pdf,.pdf"
+              >
+              <small class="form-text text-muted">
+                Файл загрузится на сервер и будет доступен на сайте.
+              </small>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">Содержимое (заметки, текст, ссылки)</label>
+              <textarea
+                name="content"
+                rows="4"
+                class="form-control"
+                placeholder="Дополнительный текст, ссылки на документы и т.п."
+              ></textarea>
+            </div>
+
+            <div class="mb-3" style="max-width: 160px;">
+              <label class="form-label">Порядок отображения</label>
+              <input
+                type="number"
+                name="order"
+                value="0"
+                class="form-control"
+              >
+            </div>
+
+            <div class="d-grid">
+              <button type="submit" class="btn btn-primary">
+                Сохранить материал
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-7">
+      <div class="card shadow-sm">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <strong>Список материалов</strong>
+          <span class="text-muted small">
+            Всего: {{ materials|length }}
+          </span>
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-striped mb-0 align-middle">
+              <thead>
+                <tr>
+                  <th style="width: 60px;">ID</th>
+                  <th>Модуль</th>
+                  <th>Название</th>
+                  <th style="width: 90px;">Порядок</th>
+                </tr>
+              </thead>
+              <tbody>
+              {% for m in materials %}
+                <tr>
+                  <td class="text-muted">{{ m.id }}</td>
+                  <td>{{ m.module_title }}</td>
+                  <td>
+                    <a href="{% url 'training_material_detail_page' m.id %}">
+                      {{ m.title }}
+                    </a>
+                  </td>
+                  <td>{{ m.order }}</td>
+                </tr>
+              {% empty %}
+                <tr>
+                  <td colspan="4" class="text-center text-muted py-3">
+                    Материалов пока нет. Добавьте первый с помощью формы слева.
+                  </td>
+                </tr>
+              {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+

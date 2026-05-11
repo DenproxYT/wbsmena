@@ -1,0 +1,921 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<style>
+  /* Тест: радио крупнее, но без «вылезания» за карточку (Bootstrap float + negative margin сбрасываем) */
+  .training-exam-root .exam-q-card .card-body {
+    overflow-x: hidden;
+    min-width: 0;
+  }
+  .exam-form-check {
+    padding-left: 0;
+    margin-left: 0;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.65rem;
+    clear: both;
+  }
+  .exam-form-check .exam-choice-radio {
+    float: none;
+    position: relative;
+    left: auto;
+    top: auto;
+    margin-top: 0.28em;
+    margin-left: 0 !important;
+    margin-right: 0;
+    flex-shrink: 0;
+    width: 1.25em;
+    height: 1.25em;
+    border-width: 2px;
+  }
+  .exam-form-check .exam-choice-radio:focus {
+    box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.25);
+  }
+  .exam-form-check .exam-choice-radio:checked {
+    background-size: 0.6em;
+  }
+  .exam-form-check .exam-choice-check {
+    float: none;
+    position: relative;
+    left: auto;
+    top: auto;
+    margin-top: 0.22em;
+    margin-left: 0 !important;
+    margin-right: 0;
+    flex-shrink: 0;
+    width: 1.2em;
+    height: 1.2em;
+    border-width: 2px;
+    border-radius: 0.35em;
+  }
+  .exam-form-check .form-check-label {
+    padding-top: 0.12rem;
+    line-height: 1.4;
+    flex: 1;
+    min-width: 0;
+    word-break: break-word;
+    cursor: pointer;
+  }
+</style>
+<div class="row">
+  <div class="col-md-10 offset-md-1">
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+      <div>
+        <h2 class="mb-1 fw-bold">
+          <i class="bi bi-book text-primary"></i> Обучение сотрудников
+        </h2>
+        <p class="text-muted mb-0">Пошаговые инструкции и тестирование для стажёров и сотрудников.</p>
+      </div>
+      <div class="d-flex flex-wrap align-items-center justify-content-end gap-2 ms-auto">
+        <button type="button" class="btn btn-secondary btn-sm d-none" id="btnFinalExam" disabled
+                data-exam-id="" title="Сначала завершите все обучающие материалы">
+          <i class="bi bi-patch-question"></i> Пройти тестирование
+        </button>
+        {% if is_accounts_admin|default:False %}
+        <a href="/training/manage/" class="btn btn-outline-primary btn-sm">
+          <i class="bi bi-plus-circle"></i> Добавить материал
+        </a>
+        <a href="/training/stats/" class="btn btn-outline-secondary btn-sm">
+          <i class="bi bi-graph-up"></i> Статистика сотрудников
+        </a>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="row g-4">
+      <!-- Список материалов -->
+      <div class="col-lg-4">
+        <div class="card card-shadow h-100">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">
+              <i class="bi bi-journal-text text-primary"></i> Материалы
+            </h5>
+            <span id="overallProgressBadge" class="badge bg-success d-none"></span>
+          </div>
+          <div class="card-body p-0">
+            <div id="materialsList" class="list-group list-group-flush" style="max-height: 520px; overflow-y: auto;">
+              <div class="p-4 text-center text-muted">
+                <div class="spinner-border spinner-border-sm text-primary mb-2" role="status"></div>
+                <div>Загрузка материалов...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Область просмотра инструкции и теста -->
+      <div class="col-lg-8">
+        <div id="viewerCard" class="card card-shadow h-100">
+          <div class="card-body d-flex flex-column" id="viewerContainer">
+            <div class="text-center text-muted py-5" id="viewerEmpty">
+              <i class="bi bi-info-circle fs-2 mb-2"></i>
+              <p class="mb-1">Выберите инструкцию слева, чтобы начать обучение.</p>
+              <small>Например: <strong>Как работать с программой WB PVZ</strong> → <strong>Инструкция по приемке товара</strong>.</small>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="{% static 'training/pdf_page_viewer.js' %}"></script>
+<script>
+  let trainingMaterials = [];
+  let currentMaterialId = null;
+  let currentSlideIndex = 0;
+  let pdfViewerInstance = null;
+
+  function destroyPdfViewer() {
+    if (pdfViewerInstance) {
+      try {
+        pdfViewerInstance.destroy();
+      } catch (e) {}
+      pdfViewerInstance = null;
+    }
+  }
+
+  function escHtml(s) {
+    if (s === undefined || s === null) return '';
+    const d = document.createElement('div');
+    d.textContent = String(s);
+    return d.innerHTML;
+  }
+
+  function getCSRF() {
+    return window.getCSRF ? window.getCSRF() : '';
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    const examBtn = document.getElementById('btnFinalExam');
+    if (examBtn) {
+      examBtn.addEventListener('click', function () {
+        const id = this.dataset.examId;
+        if (id && !this.disabled) openTest(parseInt(id, 10));
+      });
+    }
+    loadTrainingMaterials(true);
+  });
+
+  function getLearningMaterials() {
+    return (trainingMaterials || []).filter(m => !m.is_test_only);
+  }
+
+  function getExamMaterial() {
+    return (trainingMaterials || []).find(m => m.is_test_only && m.has_test);
+  }
+
+  function userCanAccessTrainingTest() {
+    return trainingMaterials.length > 0 && trainingMaterials[0].can_access_training_test === true;
+  }
+
+  function updateFinalExamButton() {
+    const btn = document.getElementById('btnFinalExam');
+    if (!btn) return;
+    if (!userCanAccessTrainingTest()) {
+      btn.classList.add('d-none');
+      return;
+    }
+    const exam = getExamMaterial();
+    if (!exam) {
+      btn.classList.add('d-none');
+      return;
+    }
+    btn.classList.remove('d-none');
+    btn.dataset.examId = String(exam.id);
+    const st = exam.test_access_status || 'none';
+    const msg = exam.test_access_message || '';
+
+    btn.classList.remove('btn-success', 'btn-secondary', 'btn-outline-secondary');
+    if (st === 'available') {
+      btn.disabled = false;
+      btn.classList.add('btn-success');
+      btn.title = 'Открыть итоговый тест (порог 90%, до 3 попыток)';
+      btn.innerHTML = '<i class="bi bi-patch-question"></i> Пройти тестирование';
+    } else if (st === 'passed') {
+      btn.disabled = true;
+      btn.classList.add('btn-outline-secondary');
+      btn.title = 'Тест уже успешно пройден';
+      btn.innerHTML = '<i class="bi bi-patch-check-fill text-success"></i> Тест пройден';
+    } else if (st === 'exhausted') {
+      btn.disabled = true;
+      btn.classList.add('btn-secondary');
+      btn.title = msg || 'Попытки исчерпаны';
+      btn.innerHTML = '<i class="bi bi-slash-circle"></i> Попытки исчерпаны';
+    } else if (st === 'locked') {
+      btn.disabled = true;
+      btn.classList.add('btn-secondary');
+      btn.title = msg || 'Сначала завершите все обучающие материалы';
+      btn.innerHTML = '<i class="bi bi-lock"></i> Пройти тестирование';
+    } else {
+      btn.disabled = true;
+      btn.classList.add('btn-secondary');
+      btn.title = msg || 'Тест недоступен';
+      btn.innerHTML = '<i class="bi bi-patch-question"></i> Пройти тестирование';
+    }
+  }
+
+  async function loadTrainingMaterials(openFirst) {
+    const listEl = document.getElementById('materialsList');
+    try {
+      const res = await fetch('/api/training/', { headers: { 'X-CSRFToken': getCSRF() } });
+      if (!res.ok) {
+        const txt = await res.text();
+        console.error('Ошибка загрузки материалов', txt);
+        listEl.innerHTML = '<div class="p-4 text-center text-danger">Не удалось загрузить материалы обучения.</div>';
+        return;
+      }
+      trainingMaterials = await res.json();
+      renderMaterialsList();
+      updateOverallProgress();
+      updateFinalExamButton();
+      if (openFirst) {
+        const learn = getLearningMaterials();
+        if (learn.length > 0) openLesson(learn[0].id);
+        else if (trainingMaterials.length > 0) openLesson(trainingMaterials[0].id);
+      }
+    } catch (e) {
+      console.error(e);
+      listEl.innerHTML = '<div class="p-4 text-center text-danger">Ошибка загрузки материалов.</div>';
+    }
+  }
+
+  function groupByModule(materials) {
+    const map = {};
+    materials.forEach(m => {
+      const key = m.module_title || 'Обучение';
+      if (!map[key]) map[key] = [];
+      map[key].push(m);
+    });
+    Object.keys(map).forEach(k => {
+      map[k].sort((a, b) => (a.order || 0) - (b.order || 0));
+    });
+    return map;
+  }
+
+  function renderMaterialsList() {
+    const listEl = document.getElementById('materialsList');
+    if (!trainingMaterials || trainingMaterials.length === 0) {
+      listEl.innerHTML = '<div class="p-4 text-center text-muted">Пока нет материалов. Добавьте их через админку.</div>';
+      return;
+    }
+    const grouped = groupByModule(trainingMaterials);
+    let html = '';
+    Object.keys(grouped).forEach(moduleTitle => {
+      const items = grouped[moduleTitle].filter(m => !m.is_test_only);
+      if (items.length === 0) return;
+      html += `
+        <div class="list-group-item bg-light fw-semibold text-uppercase small text-muted">
+          <i class="bi bi-collection-play text-primary"></i> ${moduleTitle}
+        </div>
+      `;
+      items.forEach(m => {
+        const active = m.id === currentMaterialId ? ' active' : '';
+        const progress = m.progress_percent || 0;
+        html += `
+          <button type="button"
+                  class="list-group-item list-group-item-action d-flex justify-content-between align-items-center${active}"
+                  onclick="openLesson(${m.id})">
+            <div class="text-start">
+              <div class="fw-semibold">${m.title}</div>
+              ${m.description ? `<div class="small text-muted">${m.description}</div>` : ''}
+            </div>
+            <div class="text-end">
+              <div class="small text-muted">${progress}%</div>
+              <div class="progress" style="width: 80px; height: 5px;">
+                <div class="progress-bar bg-success" role="progressbar" style="width: ${progress}%;"></div>
+              </div>
+            </div>
+          </button>
+        `;
+      });
+    });
+    if (!html.trim()) {
+      listEl.innerHTML = '<div class="p-4 text-center text-muted">Обучающих материалов в списке нет. Добавьте инструкции в админке.</div>';
+      return;
+    }
+    listEl.innerHTML = html;
+  }
+
+  function updateOverallProgress() {
+    const badge = document.getElementById('overallProgressBadge');
+    if (!trainingMaterials || trainingMaterials.length === 0) {
+      badge.classList.add('d-none');
+      return;
+    }
+    const learn = getLearningMaterials();
+    if (learn.length === 0) {
+      badge.classList.add('d-none');
+      return;
+    }
+    const sum = learn.reduce((acc, m) => acc + (m.progress_percent || 0), 0);
+    const avg = Math.round(sum / learn.length);
+    badge.textContent = avg + '% пройдено';
+    badge.classList.remove('d-none');
+  }
+
+  function openLesson(materialId) {
+    const material = trainingMaterials.find(m => m.id === materialId);
+    if (!material) return;
+    if (material.is_test_only) {
+      const exam = getExamMaterial();
+      updateFinalExamButton();
+      const container = document.getElementById('viewerContainer');
+      let hint;
+      if (!userCanAccessTrainingTest()) {
+        hint = 'Итоговое тестирование доступно только стажёрам.';
+      } else if (exam && exam.test_access_status === 'available') {
+        hint = 'Нажмите кнопку «Пройти тестирование» вверху страницы.';
+      } else {
+        hint = exam && exam.test_access_message
+          ? escHtml(exam.test_access_message)
+          : 'Сначала завершите все обучающие материалы. Тест открывается кнопкой «Пройти тестирование» вверху.';
+      }
+      container.innerHTML = `
+        <div class="text-center text-muted py-5 px-3">
+          <i class="bi bi-patch-question fs-1 mb-3 d-block text-primary"></i>
+          <p class="mb-2 fw-semibold">${escHtml(material.title)}</p>
+          <p class="mb-0 small">${hint}</p>
+        </div>`;
+      currentMaterialId = null;
+      renderMaterialsList();
+      return;
+    }
+    currentMaterialId = materialId;
+    currentSlideIndex = 0;
+    renderMaterialsList();
+    renderLessonViewer(material);
+  }
+
+  function getPdfUrl(material) {
+    if (!material) return '';
+    if (material.pdf_url) return material.pdf_url;
+    const c = (material.content || '').trim();
+    if (c.startsWith('PDF_URL:')) return c.substring('PDF_URL:'.length).trim();
+    return '';
+  }
+
+  function renderPdfLessonViewer(material, pdfUrl) {
+    const container = document.getElementById('viewerContainer');
+    const safeTitle = escHtml(material.title);
+    const safeModule = escHtml(material.module_title || '');
+    container.innerHTML = `
+      <div class="d-flex flex-column h-100">
+        <div class="mb-2">
+          <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+            <div>
+              <h4 class="mb-1">${safeTitle}</h4>
+              <div class="text-muted small">${safeModule}</div>
+            </div>
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="pdfBtnOpenTab">
+                <i class="bi bi-box-arrow-up-right"></i> В новой вкладке
+              </button>
+              <a class="btn btn-primary btn-sm" id="pdfDownloadLink" href="${pdfUrl}" download>
+                <i class="bi bi-download"></i> Скачать
+              </a>
+            </div>
+          </div>
+          <div class="progress mt-2" style="height: 6px;">
+            <div id="pdfReadingBar" class="progress-bar bg-success" role="progressbar" style="width: 0%;"></div>
+          </div>
+          <div class="small text-muted mt-1" id="pdfProgressHint">
+            Листайте страницы кнопками внизу. Затем нажмите «Завершить», чтобы отметить материал пройденным.
+          </div>
+        </div>
+
+        <div id="pdfFsTarget" class="d-flex flex-column flex-grow-1 rounded-4 border shadow-sm bg-body overflow-hidden" style="min-height: calc(100vh - 340px);">
+          <div class="d-flex justify-content-end align-items-center gap-2 px-2 py-1 border-bottom bg-light">
+            <button type="button" class="btn btn-sm btn-outline-secondary border-0" id="pdfBtnPrint" title="Печать">
+              <i class="bi bi-printer"></i>
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary border-0" id="pdfBtnFullscreen" title="На весь экран">
+              <i class="bi bi-arrows-fullscreen"></i>
+            </button>
+          </div>
+          <div id="pdfCanvasWrap" class="flex-grow-1 position-relative d-flex align-items-center justify-content-center training-pdf-backdrop" style="min-height: calc(100vh - 420px);">
+            <canvas id="trainingPdfCanvas" class="bg-white shadow"></canvas>
+            <div id="pdfLoading" class="position-absolute small text-muted">Загрузка PDF…</div>
+          </div>
+          <div class="d-flex justify-content-center align-items-center gap-3 py-3 px-2 border-top bg-body">
+            <button type="button" class="btn btn-light border rounded-circle shadow-sm" id="pdfBtnPrev" style="width:44px;height:44px;" aria-label="Предыдущая страница">
+              <i class="bi bi-chevron-left fs-5"></i>
+            </button>
+            <span id="pdfPageLabel" class="fw-semibold text-secondary user-select-none" style="min-width: 6rem; text-align:center;">— / —</span>
+            <button type="button" class="btn btn-light border rounded-circle shadow-sm" id="pdfBtnNext" style="width:44px;height:44px;" aria-label="Следующая страница">
+              <i class="bi bi-chevron-right fs-5"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
+          <div class="text-muted small"></div>
+          <button type="button" class="btn btn-success" onclick="finishPdfLesson(${material.id})">
+            <i class="bi bi-check2-circle"></i> Завершить
+          </button>
+        </div>
+        <div id="lessonFooter" class="mt-2 small text-muted"></div>
+      </div>
+    `;
+
+    document.getElementById('pdfBtnOpenTab').addEventListener('click', function () {
+      window.open(pdfUrl, '_blank', 'noopener,noreferrer');
+    });
+    document.getElementById('pdfBtnPrint').addEventListener('click', function () {
+      const w = window.open(pdfUrl, '_blank', 'noopener,noreferrer');
+      if (w) w.onload = function () { try { w.print(); } catch (e) {} };
+    });
+
+    pdfViewerInstance = new TrainingPdfPageViewer({
+      pdfUrl: pdfUrl,
+      canvas: document.getElementById('trainingPdfCanvas'),
+      wrap: document.getElementById('pdfCanvasWrap'),
+      loadingEl: document.getElementById('pdfLoading'),
+      pageLabelEl: document.getElementById('pdfPageLabel'),
+      btnPrev: document.getElementById('pdfBtnPrev'),
+      btnNext: document.getElementById('pdfBtnNext'),
+      btnFs: document.getElementById('pdfBtnFullscreen'),
+      fsTarget: document.getElementById('pdfFsTarget'),
+      onPageChange: function (cur, tot) {
+        const bar = document.getElementById('pdfReadingBar');
+        if (bar && tot > 0) {
+          bar.style.width = Math.round((cur / tot) * 100) + '%';
+        }
+        saveProgress(material.id, cur, tot, false);
+      },
+    });
+    pdfViewerInstance.init();
+  }
+
+  function finishPdfLesson(materialId) {
+    const bar = document.getElementById('pdfReadingBar');
+    const hint = document.getElementById('pdfProgressHint');
+    let total = 1;
+    if (pdfViewerInstance && pdfViewerInstance.numPages) {
+      total = pdfViewerInstance.numPages;
+    }
+    if (bar) bar.style.width = '100%';
+    if (hint) hint.textContent = 'Материал отмечен как пройденный.';
+    saveProgress(materialId, total, total, true);
+    const footer = document.getElementById('lessonFooter');
+    if (footer) {
+      const material = trainingMaterials.find(m => m.id === materialId);
+      footer.innerHTML = 'Материал пройден. Выберите следующий слева.';
+    }
+  }
+
+  function renderLessonViewer(material) {
+    destroyPdfViewer();
+    const container = document.getElementById('viewerContainer');
+    const pdfUrl = getPdfUrl(material);
+    if (pdfUrl) {
+      renderPdfLessonViewer(material, pdfUrl);
+      return;
+    }
+    const slides = material.slides || [];
+    if (slides.length === 0) {
+      container.innerHTML = `
+        <div class="d-flex flex-column h-100">
+          <div>
+            <h4 class="mb-1">${escHtml(material.title)}</h4>
+            <div class="text-muted mb-3">${escHtml(material.module_title || '')}</div>
+          </div>
+          <div class="flex-grow-1 d-flex flex-column justify-content-center align-items-center text-muted">
+            <i class="bi bi-images fs-2 mb-2"></i>
+            <p class="mb-1">Для этого материала ещё не добавлены слайды.</p>
+            <small>Заполните их в админке в разделе «Training slides».</small>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
+    const slide = slides[currentSlideIndex] || slides[0];
+    const total = slides.length;
+    const index = currentSlideIndex + 1;
+    const progress = Math.round((index / total) * 100);
+
+    container.innerHTML = `
+      <div class="d-flex flex-column h-100">
+        <div class="mb-3">
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <div>
+              <h4 class="mb-1">${material.title}</h4>
+              <div class="text-muted small">${material.module_title || ''}</div>
+            </div>
+            <div class="text-end small text-muted">
+              Шаг ${index} из ${total}
+            </div>
+          </div>
+          <div class="progress" style="height: 6px;">
+            <div class="progress-bar bg-success" role="progressbar" style="width: ${progress}%;"></div>
+          </div>
+        </div>
+
+        <div class="flex-grow-1 d-flex flex-column justify-content-center align-items-center mb-3">
+          ${slide.image_url ? `
+            <div class="mb-3 w-100 text-center">
+              <img src="${slide.image_url}" alt="" class="img-fluid rounded shadow-sm fade-in" style="max-height: 340px; object-fit: contain;">
+            </div>
+          ` : ''}
+          ${slide.text ? `<div class="card border-0 bg-light w-100"><div class="card-body small">${slide.text}</div></div>` : ''}
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center mt-2">
+          <button type="button" class="btn btn-outline-secondary" onclick="prevSlide()" ${index === 1 ? 'disabled' : ''}>
+            <i class="bi bi-arrow-left"></i> Назад
+          </button>
+          <div class="text-muted small"></div>
+          <button type="button" class="btn btn-primary" onclick="nextSlide()">
+            ${index === total ? 'Завершить' : 'Далее'} <i class="bi bi-arrow-right"></i>
+          </button>
+        </div>
+
+        <div id="lessonFooter" class="mt-3 small text-muted"></div>
+      </div>
+    `;
+
+    const footer = document.getElementById('lessonFooter');
+    if (index === total) {
+      const text = userCanAccessTrainingTest()
+        ? 'Вы просмотрели всю инструкцию. Выберите слева другую инструкцию или итоговый тест — кнопка «Пройти тестирование» вверху страницы.'
+        : 'Вы просмотрели всю инструкцию. Выберите слева другую инструкцию для продолжения.';
+      footer.innerHTML = text;
+    } else {
+      footer.textContent = 'Нажмите «Далее», чтобы перейти к следующему шагу.';
+    }
+
+    // Отправляем прогресс на сервер
+    saveProgress(material.id, index, total, index === total);
+  }
+
+  async function saveProgress(materialId, completedSlides, totalSlides, isCompleted) {
+    try {
+      await fetch('/api/training/progress/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCSRF()
+        },
+        body: JSON.stringify({
+          material: materialId,
+          completed_slides: completedSlides,
+          total_slides: totalSlides,
+          is_completed: isCompleted
+        })
+      });
+      // Обновляем прогресс в локальном списке
+      const material = trainingMaterials.find(m => m.id === materialId);
+      if (material) {
+        const percent = totalSlides > 0 ? Math.round((completedSlides / totalSlides) * 100) : 0;
+        material.progress_percent = isCompleted ? 100 : percent;
+        if (isCompleted) material.is_completed = true;
+        renderMaterialsList();
+        updateOverallProgress();
+        updateFinalExamButton();
+      }
+    } catch (e) {
+      console.error('Ошибка сохранения прогресса', e);
+    }
+  }
+
+  function prevSlide() {
+    const material = trainingMaterials.find(m => m.id === currentMaterialId);
+    if (!material || getPdfUrl(material)) return;
+    if (!material.slides || material.slides.length === 0) return;
+    if (currentSlideIndex <= 0) return;
+    currentSlideIndex -= 1;
+    renderLessonViewer(material);
+  }
+
+  function nextSlide() {
+    const material = trainingMaterials.find(m => m.id === currentMaterialId);
+    if (!material || getPdfUrl(material)) return;
+    if (!material.slides || material.slides.length === 0) return;
+    if (currentSlideIndex < material.slides.length - 1) {
+      currentSlideIndex += 1;
+      renderLessonViewer(material);
+    } else {
+      // На последнем слайде: просто ещё раз обновим прогресс
+      renderLessonViewer(material);
+    }
+  }
+
+  // ===== Тестирование =====
+  window.__trainingTestQuestions = [];
+
+  function blockLabelForOrder(order) {
+    if (order <= 10) return 'Блок 1. Один правильный ответ (1–10)';
+    if (order <= 18) return 'Блок 2. Несколько правильных ответов (11–18)';
+    if (order <= 25) return 'Блок 3. Установление порядка действий (19–25)';
+    return 'Блок 4. Проверка порядка действий (26–30)';
+  }
+
+  function renderQuestionBlockHeader(order) {
+    if (order === 1 || order === 11 || order === 19 || order === 26) {
+      return `<div class="exam-block-title mt-4 mb-3 pb-2 border-bottom border-primary border-opacity-25">
+        <span class="text-primary fw-semibold"><i class="bi bi-bookmarks me-2"></i>${escHtml(blockLabelForOrder(order))}</span>
+      </div>`;
+    }
+    return '';
+  }
+
+  function renderOrderingQuestion(q) {
+    const items = (q.answers || []).map(a => `
+      <li class="list-group-item d-flex align-items-center justify-content-between gap-2 exam-order-item" data-aid="${a.id}">
+        <span class="small flex-grow-1">${escHtml(a.text)}</span>
+        <div class="btn-group btn-group-sm">
+          <button type="button" class="btn btn-outline-secondary" onclick="moveOrderStep(${q.id}, this, -1)" title="Вверх"><i class="bi bi-chevron-up"></i></button>
+          <button type="button" class="btn btn-outline-secondary" onclick="moveOrderStep(${q.id}, this, 1)" title="Вниз"><i class="bi bi-chevron-down"></i></button>
+        </div>
+      </li>
+    `).join('');
+    return `
+      <ol class="list-group list-group-numbered list-group-flush border rounded overflow-hidden" id="ord_${q.id}">
+        ${items}
+      </ol>
+      <div class="form-text mt-1">Расположите шаги в правильном порядке (кнопки вверх/вниз).</div>
+    `;
+  }
+
+  function renderOrderJudgmentQuestion(q) {
+    const stmts = (q.meta && q.meta.statements) ? q.meta.statements : [];
+    const list = stmts.map((t, i) => `<li class="mb-1"><span class="badge bg-secondary me-2">${i + 1}</span>${escHtml(t)}</li>`).join('');
+    return `
+      <ol class="ps-3 mb-3 small">${list}</ol>
+      <div class="mb-2 fw-semibold small text-muted">Последовательность шагов в задании верна?</div>
+      <div class="btn-group mb-3" role="group">
+        <input type="radio" class="btn-check" name="jq_${q.id}" id="jq_${q.id}_v" value="valid" autocomplete="off">
+        <label class="btn btn-outline-success" for="jq_${q.id}_v"><i class="bi bi-check-lg me-1"></i>Правильно</label>
+        <input type="radio" class="btn-check" name="jq_${q.id}" id="jq_${q.id}_i" value="invalid" autocomplete="off">
+        <label class="btn btn-outline-danger" for="jq_${q.id}_i"><i class="bi bi-x-lg me-1"></i>Неправильно</label>
+      </div>
+      <div class="mb-1">
+        <label class="form-label small text-muted mb-0" for="jord_${q.id}">Если выбрали «Неправильно» — укажите верный порядок номеров шагов (например: 1 3 2 4 5)</label>
+        <input type="text" class="form-control form-control-sm" id="jord_${q.id}" placeholder="Только при «Неправильно»" autocomplete="off">
+      </div>
+    `;
+  }
+
+  window.moveOrderStep = function (qid, btn, dir) {
+    const li = btn.closest('li');
+    const ol = document.getElementById('ord_' + qid);
+    if (!li || !ol) return;
+    const sib = dir < 0 ? li.previousElementSibling : li.nextElementSibling;
+    if (!sib) return;
+    if (dir < 0) ol.insertBefore(li, sib);
+    else ol.insertBefore(sib, li);
+  };
+
+  async function openTest(materialId) {
+    const container = document.getElementById('viewerContainer');
+    try {
+      const res = await fetch(`/api/training/tests/${materialId}/`, {
+        headers: { 'X-CSRFToken': getCSRF() }
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 403) {
+        container.innerHTML = `
+          <div class="card border-0 shadow-sm">
+            <div class="card-body p-4 text-center">
+              <i class="bi bi-lock-fill text-warning fs-1 mb-3 d-block"></i>
+              <h5>Тест сейчас недоступен</h5>
+              <p class="text-muted mb-4">${escHtml(data.detail || 'Нет доступа.')}</p>
+              <button type="button" class="btn btn-primary" onclick="(function(){ const l=getLearningMaterials(); if(l.length) openLesson(l[0].id); else loadTrainingMaterials(false); })()">К обучению</button>
+            </div>
+          </div>`;
+        return;
+      }
+      if (!res.ok) {
+        alert(data.detail || 'Не удалось загрузить тест.');
+        return;
+      }
+      if (data.already_passed) {
+        container.innerHTML = `
+          <div class="card border-0 shadow-sm" style="max-width:520px;margin:0 auto;">
+            <div class="card-body p-4 text-center">
+              <i class="bi bi-patch-check-fill text-success fs-1 mb-3 d-block"></i>
+              <h5>${escHtml(data.title || 'Тест')}</h5>
+              <p class="text-muted mb-0">${escHtml(data.message || '')}</p>
+              ${data.last_percent != null ? `<p class="mt-3 mb-0 fw-semibold">Результат: ${data.last_percent}% (${data.last_score}/${data.last_max_score})</p>` : ''}
+              <button type="button" class="btn btn-outline-primary mt-4" onclick="openLesson(${materialId})">Закрыть</button>
+            </div>
+          </div>`;
+        return;
+      }
+      renderTest(materialId, data);
+    } catch (e) {
+      console.error('Ошибка загрузки теста', e);
+      alert('Ошибка загрузки теста.');
+    }
+  }
+
+  function renderTest(materialId, test) {
+    const container = document.getElementById('viewerContainer');
+    const questions = (test.questions || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+    window.__trainingTestQuestions = questions;
+    if (questions.length === 0) {
+      container.innerHTML = '<div class="alert alert-info">Тест пока не настроен.</div>';
+      return;
+    }
+    const th = test.pass_threshold_percent || 90;
+    const au = test.attempts_used != null ? test.attempts_used : 0;
+    const ma = test.max_attempts != null ? test.max_attempts : 3;
+    let html = `
+      <div class="d-flex flex-column h-100 training-exam-root">
+        <div class="rounded-3 p-3 mb-3 text-white" style="background: linear-gradient(120deg, #2563eb, #7c3aed);">
+          <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <div>
+              <h4 class="mb-1 fw-bold">${escHtml(test.title || 'Тестирование')}</h4>
+              <div class="small opacity-90">Порог сдачи: ${th}% · Попытка ${au + 1} из ${ma}</div>
+            </div>
+            <div class="badge bg-white text-dark px-3 py-2">${questions.length} вопросов</div>
+          </div>
+        </div>
+        <form id="trainingTestForm" class="flex-grow-1 d-flex flex-column" style="min-height:0;">
+          <div class="flex-grow-1 exam-scroll pr-1" style="overflow-y:auto;">
+    `;
+    questions.forEach((q) => {
+      html += renderQuestionBlockHeader(q.order || 0);
+      const qt = q.question_type || 'single';
+      html += `<div class="card border-0 shadow-sm mb-3 exam-q-card" data-qid="${q.id}" data-qtype="${qt}">
+        <div class="card-body">
+          <div class="fw-semibold mb-2"><span class="text-primary me-2">${q.order}.</span>${escHtml(q.text)}</div>`;
+      if (qt === 'single') {
+        (q.answers || []).forEach(a => {
+          html += `
+            <div class="form-check exam-form-check mb-2">
+              <input class="form-check-input exam-choice-radio" type="radio" name="q_${q.id}" id="ans_${a.id}" value="${a.id}">
+              <label class="form-check-label" for="ans_${a.id}">${escHtml(a.text)}</label>
+            </div>`;
+        });
+      } else if (qt === 'multiple') {
+        (q.answers || []).forEach(a => {
+          html += `
+            <div class="form-check exam-form-check mb-2">
+              <input class="form-check-input exam-choice-check" type="checkbox" name="qm_${q.id}" id="m_${q.id}_${a.id}" value="${a.id}">
+              <label class="form-check-label" for="m_${q.id}_${a.id}">${escHtml(a.text)}</label>
+            </div>`;
+        });
+      } else if (qt === 'ordering') {
+        html += renderOrderingQuestion(q);
+      } else if (qt === 'order_judgment') {
+        html += renderOrderJudgmentQuestion(q);
+      }
+      html += `</div></div>`;
+    });
+    html += `
+          </div>
+          <div class="mt-3 pt-3 border-top d-flex flex-wrap justify-content-between align-items-center gap-2 bg-body">
+            <button type="button" class="btn btn-outline-secondary" onclick="openLesson(${materialId})">
+              <i class="bi bi-arrow-left"></i> Назад
+            </button>
+            <button type="button" class="btn btn-success px-4" onclick="submitTest(${materialId})">
+              <i class="bi bi-send-check me-1"></i> Отправить ответы
+            </button>
+          </div>
+        </form>
+      </div>`;
+    container.innerHTML = html;
+  }
+
+  function collectTestAnswers(questions) {
+    const answers = {};
+    for (const q of questions) {
+      const qt = q.question_type || 'single';
+      const id = q.id;
+      if (qt === 'single') {
+        const el = document.querySelector('input[name="q_' + id + '"]:checked');
+        if (el) answers[id] = parseInt(el.value, 10);
+      } else if (qt === 'multiple') {
+        const nodes = document.querySelectorAll('input[name="qm_' + id + '"]:checked');
+        answers[id] = Array.from(nodes).map(n => parseInt(n.value, 10));
+      } else if (qt === 'ordering') {
+        const ol = document.getElementById('ord_' + id);
+        if (ol) {
+          answers[id] = Array.from(ol.querySelectorAll('[data-aid]')).map(li => parseInt(li.getAttribute('data-aid'), 10));
+        }
+      } else if (qt === 'order_judgment') {
+        const jr = document.querySelector('input[name="jq_' + id + '"]:checked');
+        const ordInp = document.getElementById('jord_' + id);
+        answers[id] = {
+          judgment: jr ? jr.value : '',
+          order: ordInp ? ordInp.value : ''
+        };
+      }
+    }
+    return answers;
+  }
+
+  function renderTestResult(materialId, data, questionsMeta) {
+    const container = document.getElementById('viewerContainer');
+    const passed = !!data.passed;
+    const pct = data.percent != null ? data.percent : Math.round((data.score / (data.max_score || 1)) * 100);
+    const review = data.review || [];
+    const mapOk = {};
+    review.forEach(r => { mapOk[r.question_id] = r.ok; });
+    let blocks = '';
+    (questionsMeta || []).forEach(q => {
+      const ok = mapOk[q.id];
+      const wrong = ok === false;
+      const qt = q.question_type || 'single';
+      let body = '';
+      if (qt === 'single') {
+        (q.answers || []).forEach(a => {
+          const picked = document.querySelector('input[name="q_' + q.id + '"]:checked');
+          const was = picked && parseInt(picked.value, 10) === a.id;
+          if (!was) return;
+          body += `<div class="p-2 rounded ${wrong ? 'bg-danger bg-opacity-10 border border-danger' : 'border'}">${escHtml(a.text)}</div>`;
+        });
+        if (!body) body = '<span class="text-muted small">Ответ не выбран</span>';
+      } else if (qt === 'multiple') {
+        const nodes = document.querySelectorAll('input[name="qm_' + q.id + '"]:checked');
+        if (!nodes.length) body = '<span class="text-muted small">Не выбрано</span>';
+        nodes.forEach(n => {
+          const lab = document.querySelector('label[for="' + n.id + '"]');
+          const t = lab ? lab.textContent : n.value;
+          body += `<div class="p-2 rounded mb-1 ${wrong ? 'bg-danger bg-opacity-10 border border-danger' : 'border'}">${escHtml(t)}</div>`;
+        });
+      } else if (qt === 'ordering') {
+        const ol = document.getElementById('ord_' + q.id);
+        if (ol) {
+          ol.querySelectorAll('[data-aid]').forEach(li => {
+            body += `<div class="p-2 rounded mb-1 ${wrong ? 'bg-danger bg-opacity-10 border border-danger' : 'border'}">${escHtml(li.textContent.trim())}</div>`;
+          });
+        }
+      } else if (qt === 'order_judgment') {
+        const jr = document.querySelector('input[name="jq_' + q.id + '"]:checked');
+        const ordInp = document.getElementById('jord_' + q.id);
+        const jt = jr ? (jr.value === 'valid' ? 'Правильно' : 'Неправильно') : '—';
+        body = `<div class="${wrong ? 'p-2 rounded bg-danger bg-opacity-10 border border-danger' : ''}"><div>${escHtml(jt)}</div>`;
+        if (ordInp && ordInp.value) body += `<div class="small mt-1">${escHtml(ordInp.value)}</div>`;
+        body += '</div>';
+      }
+      blocks += `
+        <div class="card border-0 shadow-sm mb-2">
+          <div class="card-body py-2 px-3">
+            <div class="small text-muted mb-1">Вопрос ${q.order}</div>
+            <div class="fw-semibold small mb-2">${escHtml(q.text)}</div>
+            ${wrong ? '<div class="small text-danger mb-2">Ответ не засчитан</div>' : ''}
+            ${body}
+          </div>
+        </div>`;
+    });
+    const failBanner = !passed ? `
+      <div class="alert alert-danger border-0 shadow-sm mt-3">
+        <strong>Вы не сдали тестирование.</strong> Просмотрите обучающий материал снова.
+        ${data.progress_reset ? '<div class="small mt-2">Прогресс по обучению сброшен — пройдите материалы заново.</div>' : ''}
+      </div>
+      <a href="/training/" class="btn btn-primary mt-2"><i class="bi bi-book me-1"></i>Перейти в обучение</a>
+    ` : `
+      <div class="alert alert-success border-0 shadow-sm mt-3">
+        <strong>Поздравляем!</strong> Вы успешно прошли тест (${pct}%, порог ${data.pass_threshold_percent || 90}%).
+      </div>
+      <button type="button" class="btn btn-outline-primary mt-2" onclick="openLesson(${materialId})">Закрыть</button>
+    `;
+    container.innerHTML = `
+      <div class="exam-result-screen">
+        <div class="text-center mb-4">
+          <div class="display-6 fw-bold ${passed ? 'text-success' : 'text-danger'}">${pct}%</div>
+          <div class="text-muted">Верно: ${data.score} из ${data.max_score}</div>
+          <div class="small text-muted">Попытка ${data.attempts_used} из ${data.max_attempts}</div>
+        </div>
+        <h6 class="fw-semibold mb-2">Ваши ответы</h6>
+        <p class="small text-muted mb-3">Неверные ответы выделены. Правильные варианты не показываются.</p>
+        <div style="max-height:360px;overflow-y:auto;">${blocks}</div>
+        ${failBanner}
+      </div>`;
+  }
+
+  async function submitTest(materialId) {
+    const questions = window.__trainingTestQuestions || [];
+    const answers = collectTestAnswers(questions);
+    try {
+      const res = await fetch(`/api/training/tests/${materialId}/attempt/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCSRF()
+        },
+        body: JSON.stringify({ answers })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.detail || 'Не удалось сохранить попытку.');
+        return;
+      }
+      const snap = questions.map(q => ({ id: q.id, order: q.order, text: q.text, question_type: q.question_type, answers: q.answers, meta: q.meta }));
+      renderTestResult(materialId, data, snap);
+      await loadTrainingMaterials(false);
+      currentMaterialId = materialId;
+      renderMaterialsList();
+      updateOverallProgress();
+    } catch (e) {
+      console.error('Ошибка отправки теста', e);
+      alert('Ошибка отправки теста.');
+    }
+  }
+</script>
+
+{% endblock %}

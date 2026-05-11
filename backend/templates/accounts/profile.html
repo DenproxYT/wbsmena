@@ -1,0 +1,224 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row fade-in">
+  <div class="col-md-8 offset-md-2">
+    <div class="card card-shadow">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <h4 class="mb-0"><i class="bi bi-person-circle text-primary"></i> Профиль</h4>
+        <a class="btn btn-outline-secondary btn-sm" href="/accounts/logout/">
+          <i class="bi bi-box-arrow-right"></i> Выйти
+        </a>
+      </div>
+      <div class="card-body p-4">
+        <div id="profileView" style="display: none;">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label text-muted small">ФИО</label>
+              <p class="mb-0 fw-semibold" id="vUsername">—</p>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label text-muted small">Роль</label>
+              <p class="mb-0 fw-semibold" id="vRole">—</p>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label text-muted small">Имя</label>
+              <p class="mb-0" id="vFirstName">—</p>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label text-muted small">Фамилия</label>
+              <p class="mb-0" id="vLastName">—</p>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label text-muted small">Email</label>
+              <p class="mb-0" id="vEmail">—</p>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label text-muted small">Телефон</label>
+              <p class="mb-0" id="vPhone">—</p>
+            </div>
+            <div class="col-12">
+              <label class="form-label text-muted small">ПВЗ (место работы)</label>
+              <p class="mb-0" id="vPvz">—</p>
+            </div>
+          </div>
+          <hr>
+          <button type="button" class="btn btn-primary" id="btnEdit">
+            <i class="bi bi-pencil"></i> Редактировать
+          </button>
+        </div>
+
+        <div id="profileEdit" style="display: none;">
+          <form id="profileForm">
+            <input type="hidden" id="profileId">
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label">Имя</label>
+                <input type="text" class="form-control" id="eFirstName" name="first_name">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Фамилия</label>
+                <input type="text" class="form-control" id="eLastName" name="last_name">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Email</label>
+                <input type="email" class="form-control" id="eEmail" name="email">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Телефон</label>
+                <input type="text" class="form-control" id="ePhone" name="phone_number" placeholder="+7...">
+              </div>
+            <div class="col-md-6">
+              <label class="form-label">ПВЗ (место работы)</label>
+              <input type="text" class="form-control" id="ePvz" name="pvz_address">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Роль</label>
+              <select class="form-select" id="eRole" name="role">
+                <option value="staff_manager">Штатный менеджер</option>
+                <option value="intern">Стажёр</option>
+                <option value="chief_manager">Главный менеджер</option>
+              </select>
+            </div>
+            </div>
+            <hr>
+            <div class="d-flex gap-2">
+              <button type="submit" class="btn btn-primary">
+                <i class="bi bi-check-circle"></i> Сохранить
+              </button>
+              <button type="button" class="btn btn-outline-secondary" id="btnCancel">
+                <i class="bi bi-x-circle"></i> Отмена
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div id="profileLoad" class="text-center text-muted py-4">
+          <div class="spinner-border text-primary" role="status"></div>
+          <p class="mt-2 mb-0">Загрузка...</p>
+        </div>
+        <div id="profileError" class="alert alert-danger" style="display: none;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  function getCookie(name) {
+    const v = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+    return v ? v.pop() : '';
+  }
+  window.getCSRF = function() { return getCookie('csrftoken'); };
+})();
+
+let profileData = null;
+
+function showView() {
+  document.getElementById('profileLoad').style.display = 'none';
+  document.getElementById('profileError').style.display = 'none';
+  document.getElementById('profileEdit').style.display = 'none';
+  document.getElementById('profileView').style.display = 'block';
+  const d = profileData;
+  const fullName = [d.first_name, d.last_name].filter(Boolean).join(' ');
+  document.getElementById('vUsername').textContent = fullName || d.username || '—';
+  document.getElementById('vRole').textContent = d.role_display || d.role || '—';
+  document.getElementById('vFirstName').textContent = d.first_name || '—';
+  document.getElementById('vLastName').textContent = d.last_name || '—';
+  document.getElementById('vEmail').textContent = d.email || '—';
+  document.getElementById('vPhone').textContent = d.phone_number || '—';
+  document.getElementById('vPvz').textContent = d.pvz_address || '—';
+}
+
+function showEdit() {
+  document.getElementById('profileView').style.display = 'none';
+  document.getElementById('profileEdit').style.display = 'block';
+  const d = profileData;
+  document.getElementById('eFirstName').value = d.first_name || '';
+  document.getElementById('eLastName').value = d.last_name || '';
+  document.getElementById('eEmail').value = d.email || '';
+  document.getElementById('ePhone').value = d.phone_number || '';
+  document.getElementById('ePvz').value = d.pvz_address || '';
+  if (['staff_manager', 'intern', 'chief_manager'].includes(d.role)) {
+    document.getElementById('eRole').value = d.role;
+  } else {
+    document.getElementById('eRole').value = 'staff_manager';
+  }
+}
+
+function showLoad() {
+  document.getElementById('profileView').style.display = 'none';
+  document.getElementById('profileEdit').style.display = 'none';
+  document.getElementById('profileError').style.display = 'none';
+  document.getElementById('profileLoad').style.display = 'block';
+}
+
+async function loadProfile() {
+  showLoad();
+  try {
+    const res = await fetch('/api/accounts/profile/', { headers: { 'X-CSRFToken': window.getCSRF() } });
+    if (!res.ok) {
+      document.getElementById('profileLoad').style.display = 'none';
+      document.getElementById('profileError').style.display = 'block';
+      document.getElementById('profileError').textContent = 'Не удалось загрузить профиль.';
+      return;
+    }
+    profileData = await res.json();
+    showView();
+  } catch (e) {
+    document.getElementById('profileLoad').style.display = 'none';
+    document.getElementById('profileError').style.display = 'block';
+    document.getElementById('profileError').textContent = 'Ошибка: ' + e.message;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  loadProfile();
+
+  document.getElementById('btnEdit').addEventListener('click', function() {
+    showEdit();
+  });
+
+  document.getElementById('btnCancel').addEventListener('click', function() {
+    showView();
+  });
+
+  document.getElementById('profileForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const payload = {
+      first_name: document.getElementById('eFirstName').value.trim(),
+      last_name: document.getElementById('eLastName').value.trim(),
+      email: document.getElementById('eEmail').value.trim(),
+      phone_number: document.getElementById('ePhone').value.trim(),
+      pvz_address: document.getElementById('ePvz').value.trim(),
+      role: document.getElementById('eRole').value
+    };
+    try {
+      const res = await fetch('/api/accounts/profile/', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': window.getCSRF()
+        },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (res.ok) {
+        profileData = data;
+        showView();
+        const alert = document.createElement('div');
+        alert.className = 'alert alert-success alert-dismissible fade show mt-3';
+        alert.innerHTML = 'Профиль сохранён.<button type="button" class="btn-close" data-bs-dismiss="alert"></button>';
+        document.getElementById('profileEdit').appendChild(alert);
+        setTimeout(function() { alert.remove(); }, 3000);
+      } else {
+        const msg = typeof data === 'object' ? (data.detail || JSON.stringify(data)) : data;
+        alert('Ошибка: ' + msg);
+      }
+    } catch (err) {
+      alert('Ошибка сети: ' + err.message);
+    }
+  });
+});
+</script>
+{% endblock %}

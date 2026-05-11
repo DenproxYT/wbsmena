@@ -1,0 +1,355 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row">
+  <div class="col-12">
+    <div class="d-flex justify-content-between align-items-center mb-4 fade-in">
+      <div>
+        <h2 class="mb-1 fw-bold" style="color: var(--text-primary);">
+          <i class="bi bi-people text-primary"></i> Сотрудники
+        </h2>
+        <p class="text-muted mb-0">Управление учётными записями сотрудников</p>
+      </div>
+      <button class="btn btn-primary btn-lg" data-bs-toggle="modal" data-bs-target="#employeeModal" onclick="openCreateModal()">
+        <i class="bi bi-person-plus"></i> Добавить сотрудника
+      </button>
+    </div>
+
+    <div class="card card-shadow fade-in">
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover mb-0">
+            <thead>
+              <tr>
+                <th><i class="bi bi-person"></i> Логин / ФИО</th>
+                <th><i class="bi bi-envelope"></i> Email</th>
+                <th><i class="bi bi-telephone"></i> Телефон</th>
+                <th><i class="bi bi-geo-alt"></i> ПВЗ</th>
+                <th><i class="bi bi-award"></i> Роль</th>
+                <th><i class="bi bi-info-circle"></i> Статус</th>
+                <th><i class="bi bi-gear"></i> Действия</th>
+              </tr>
+            </thead>
+            <tbody id="employeesTableBody">
+              <tr>
+                <td colspan="7" class="text-center text-muted py-4">
+                  <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+                  Загрузка...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Модальное окно: создать / редактировать сотрудника -->
+<div class="modal fade" id="employeeModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="employeeModalTitle">
+          <i class="bi bi-person-plus text-primary"></i> Добавить сотрудника
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <form id="employeeForm">
+          <input type="hidden" id="employeeId">
+          <div class="row g-3 mb-2">
+            <div class="col-12">
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="quickRegMode">
+                <label class="form-check-label" for="quickRegMode">Быстрая регистрация</label>
+              </div>
+            </div>
+          </div>
+          <div class="row g-3" id="quickRegWrap" style="display:none;">
+            <div class="col-md-6">
+              <label class="form-label">Количество аккаунтов</label>
+              <input type="number" class="form-control" id="quickRegCount" min="1" max="500" value="1">
+            </div>
+          </div>
+          <div class="row g-3">
+            <div id="fullFormFields" class="row g-3 m-0 p-0">
+            <div class="col-md-6">
+              <label class="form-label">Логин</label>
+              <input type="text" class="form-control" id="empUsername" name="username" required>
+              <small class="text-muted">Нельзя изменить после создания</small>
+            </div>
+            <div class="col-md-6" id="empPasswordWrap">
+              <label class="form-label">Пароль</label>
+              <input type="password" class="form-control" id="empPassword" name="password" placeholder="Оставьте пустым, чтобы не менять">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Имя</label>
+              <input type="text" class="form-control" id="empFirstName" name="first_name">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Фамилия</label>
+              <input type="text" class="form-control" id="empLastName" name="last_name">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Email</label>
+              <input type="email" class="form-control" id="empEmail" name="email">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Телефон</label>
+              <input type="text" class="form-control" id="empPhone" name="phone_number" placeholder="+7...">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">ПВЗ (место работы)</label>
+              <select class="form-select" id="empPvz" name="pvz_address" required>
+                <option value="">Выберите ПВЗ</option>
+                {% for pvz in pvz_list %}
+                <option value="{{ pvz }}">{{ pvz }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Роль</label>
+              <select class="form-select" id="empRole" name="role">
+                <option value="intern">Стажёр</option>
+                <option value="staff_manager">Штатный менеджер</option>
+                <option value="chief_manager">Главный менеджер</option>
+              </select>
+            </div>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+          <i class="bi bi-x-circle"></i> Отмена
+        </button>
+        <button type="button" class="btn btn-primary" onclick="saveEmployee()">
+          <i class="bi bi-check-circle"></i> <span id="employeeSubmitText">Сохранить</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  function getCookie(name) {
+    const v = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+    return v ? v.pop() : '';
+  }
+  window.getCSRF = function() { return getCookie('csrftoken'); };
+})();
+
+let employeesList = [];
+let editingEmployeeId = null;
+const currentUserId = {{ current_user_id|default:0 }};
+
+document.addEventListener('DOMContentLoaded', function() {
+  loadEmployees();
+});
+
+async function loadEmployees() {
+  try {
+    const res = await fetch('/api/accounts/', { headers: { 'X-CSRFToken': window.getCSRF() } });
+    if (!res.ok) {
+      document.getElementById('employeesTableBody').innerHTML = '<tr><td colspan="8" class="text-center text-danger">Нет доступа или ошибка загрузки</td></tr>';
+      return;
+    }
+    employeesList = await res.json();
+    renderTable();
+  } catch (e) {
+      document.getElementById('employeesTableBody').innerHTML = '<tr><td colspan="8" class="text-center text-danger">Ошибка: ' + e.message + '</td></tr>';
+  }
+}
+
+function renderTable() {
+  const tbody = document.getElementById('employeesTableBody');
+  if (!employeesList.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Нет сотрудников</td></tr>';
+    return;
+  }
+  tbody.innerHTML = employeesList.map(function(u) {
+    const name = [u.first_name, u.last_name].filter(Boolean).join(' ') || u.username;
+    const isActive = u.is_active !== false;
+    const statusBadge = isActive
+      ? '<span class="badge bg-success">Работает</span>'
+      : '<span class="badge bg-secondary">Уволен</span>';
+    const isSelf = u.id === currentUserId;
+    let actionBtn = '';
+    if (!isSelf) {
+      actionBtn = '<button class="btn btn-sm btn-outline-danger ms-1" onclick="deleteEmployeeForever(' + u.id + ')" title="Удалить навсегда"><i class="bi bi-trash"></i></button>';
+    }
+    const rowClass = !isActive ? 'table-secondary' : '';
+    return '<tr class="' + rowClass + '">' +
+      '<td><div class="fw-medium">' + (u.username || '—') + '</div><small class="text-muted">' + name + '</small></td>' +
+      '<td><small>' + (u.email || '—') + '</small></td>' +
+      '<td><small>' + (u.phone_number || '—') + '</small></td>' +
+      '<td><small class="text-muted">' + (u.pvz_address || '—') + '</small></td>' +
+      '<td><span class="badge bg-primary">' + (u.role_display || u.role || '—') + '</span></td>' +
+      '<td>' + statusBadge + '</td>' +
+      '<td><button class="btn btn-sm btn-outline-primary" onclick="openEditModal(' + u.id + ')" title="Редактировать"><i class="bi bi-pencil"></i></button>' + actionBtn + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+function openCreateModal() {
+  editingEmployeeId = null;
+  document.getElementById('employeeModalTitle').innerHTML = '<i class="bi bi-person-plus text-primary"></i> Добавить сотрудника';
+  document.getElementById('employeeForm').reset();
+  document.getElementById('employeeId').value = '';
+  document.getElementById('empUsername').disabled = false;
+  document.getElementById('empPassword').required = true;
+  document.getElementById('empPasswordWrap').style.display = '';
+  document.getElementById('quickRegMode').checked = false;
+  document.getElementById('quickRegCount').value = 1;
+  toggleQuickRegMode();
+}
+
+async function openEditModal(id) {
+  editingEmployeeId = id;
+  document.getElementById('employeeModalTitle').innerHTML = '<i class="bi bi-pencil-square text-primary"></i> Редактировать сотрудника';
+  try {
+    const res = await fetch('/api/accounts/' + id + '/', { headers: { 'X-CSRFToken': window.getCSRF() } });
+    if (!res.ok) throw new Error('Не удалось загрузить данные');
+    const u = await res.json();
+    document.getElementById('employeeId').value = u.id;
+    document.getElementById('empUsername').value = u.username || '';
+    document.getElementById('empUsername').disabled = true;
+    document.getElementById('empPassword').value = '';
+    document.getElementById('empPassword').required = false;
+    document.getElementById('empPasswordWrap').style.display = 'none';
+    document.getElementById('empFirstName').value = u.first_name || '';
+    document.getElementById('empLastName').value = u.last_name || '';
+    document.getElementById('empEmail').value = u.email || '';
+    document.getElementById('empPhone').value = u.phone_number || '';
+    document.getElementById('empPvz').value = u.pvz_address || '';
+    document.getElementById('empRole').value = u.role || 'intern';
+    document.getElementById('quickRegMode').checked = false;
+    toggleQuickRegMode();
+    new bootstrap.Modal(document.getElementById('employeeModal')).show();
+  } catch (e) {
+    alert('Ошибка: ' + e.message);
+  }
+}
+
+async function deleteEmployeeForever(id) {
+  const u = employeesList.find(function(e) { return e.id === id; });
+  const name = u ? (u.username || [u.first_name, u.last_name].filter(Boolean).join(' ') || '') : '';
+  if (!confirm('Полностью удалить сотрудника «' + name + '» из базы? Восстановление будет невозможно.')) return;
+  try {
+    const res = await fetch('/api/accounts/' + id + '/', {
+      method: 'DELETE',
+      headers: { 'X-CSRFToken': window.getCSRF() }
+    });
+    const data = res.status === 204 ? {} : await res.json();
+    if (res.ok) {
+      loadEmployees();
+      alert('Сотрудник удалён навсегда.');
+    } else {
+      alert('Ошибка: ' + (data.detail || JSON.stringify(data)));
+    }
+  } catch (e) {
+    alert('Ошибка: ' + e.message);
+  }
+}
+
+function toggleQuickRegMode() {
+  const isQuick = document.getElementById('quickRegMode').checked;
+  const isCreate = !document.getElementById('employeeId').value;
+  document.getElementById('quickRegWrap').style.display = (isQuick && isCreate) ? '' : 'none';
+  document.getElementById('fullFormFields').style.display = (isQuick && isCreate) ? 'none' : '';
+  document.getElementById('employeeSubmitText').textContent = (isQuick && isCreate) ? 'Зарегистрировать' : 'Сохранить';
+}
+
+document.getElementById('quickRegMode').addEventListener('change', toggleQuickRegMode);
+
+async function saveEmployee() {
+  const id = document.getElementById('employeeId').value;
+  const isCreate = !id;
+  const isQuick = isCreate && document.getElementById('quickRegMode').checked;
+
+  if (isQuick) {
+    const count = parseInt(document.getElementById('quickRegCount').value || '0', 10);
+    if (!count || count < 1) {
+      alert('Укажите корректное количество аккаунтов.');
+      return;
+    }
+    try {
+      const res = await fetch('/api/accounts/bulk-create/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': window.getCSRF()
+        },
+        body: JSON.stringify({ count: count })
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        alert('Ошибка: ' + (data.detail || JSON.stringify(data)));
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'bulk_accounts.txt';
+      a.click();
+      URL.revokeObjectURL(url);
+      bootstrap.Modal.getInstance(document.getElementById('employeeModal')).hide();
+      loadEmployees();
+      alert('Аккаунты созданы. Файл с логинами и временными паролями скачан.');
+      return;
+    } catch (e) {
+      alert('Ошибка: ' + e.message);
+      return;
+    }
+  }
+
+  const payload = {
+    username: document.getElementById('empUsername').value.trim(),
+    first_name: document.getElementById('empFirstName').value.trim(),
+    last_name: document.getElementById('empLastName').value.trim(),
+    email: document.getElementById('empEmail').value.trim(),
+    phone_number: document.getElementById('empPhone').value.trim(),
+    pvz_address: document.getElementById('empPvz').value || '',
+    role: document.getElementById('empRole').value || 'intern'
+  };
+  if (isCreate) {
+    const pwd = document.getElementById('empPassword').value;
+    if (!pwd) {
+      alert('Укажите пароль для нового сотрудника.');
+      return;
+    }
+    payload.password = pwd;
+  } else {
+    const pwd = document.getElementById('empPassword').value;
+    if (pwd) payload.password = pwd;
+  }
+
+  try {
+    const url = isCreate ? '/api/accounts/create/' : '/api/accounts/' + id + '/';
+    const method = isCreate ? 'POST' : 'PUT';
+    const res = await fetch(url, {
+      method: method,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': window.getCSRF()
+      },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (res.ok) {
+      bootstrap.Modal.getInstance(document.getElementById('employeeModal')).hide();
+      loadEmployees();
+      alert(isCreate ? 'Сотрудник добавлен.' : 'Изменения сохранены.');
+    } else {
+      const msg = typeof data === 'object' ? (data.detail || Object.values(data).flat().join(' ')) : data;
+      alert('Ошибка: ' + msg);
+    }
+  } catch (e) {
+    alert('Ошибка: ' + e.message);
+  }
+}
+</script>
+{% endblock %}

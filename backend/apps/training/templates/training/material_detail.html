@@ -1,0 +1,292 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-3">
+  <div>
+    <h2 class="mb-1">{{ material.title }}</h2>
+    <p class="text-muted mb-0">{{ material.module_title }}</p>
+  </div>
+  <a href="/training/" class="btn btn-outline-secondary">
+    <i class="bi bi-arrow-left"></i> Все материалы
+  </a>
+</div>
+
+{% if material.description %}
+  <div class="alert alert-light border mb-4">{{ material.description }}</div>
+{% endif %}
+
+{% if total_slides > 0 %}
+  <div id="training-viewer" data-material-id="{{ material.id }}" data-total-slides="{{ total_slides }}">
+    <div id="training-progress" class="mb-3">
+      <div style="background:#e2e8f0; border-radius:10px; overflow:hidden; height:12px;">
+        <div id="training-progress-bar" style="background:linear-gradient(135deg, #10b981, #059669); width:0%; height:12px; transition:width 0.4s;"></div>
+      </div>
+      <div id="training-progress-text" class="text-muted small mt-1">
+        0% пройдено (0 из {{ total_slides }} шагов)
+      </div>
+    </div>
+
+    <div id="training-slide-container" style="position:relative; width:100%; min-height:320px; margin:0 auto;">
+      {% for slide in slides %}
+        <div class="training-slide"
+             data-index="{{ forloop.counter0 }}"
+             style="position:absolute; top:0; left:0; width:100%; opacity:0; pointer-events:none; transition:opacity 0.3s;">
+          <div class="card">
+            <div class="card-body p-4">
+          {% if slide.image_url %}
+            <div class="text-center mb-3">
+              <img
+                src="{{ slide.image_url }}"
+                alt=""
+                style="
+                  width:100%;
+                  height:auto;
+                  max-height:calc(100vh - 470px);
+                  border-radius:12px;
+                  box-shadow:0 4px 18px rgba(0,0,0,0.18);
+                  object-fit:contain;
+                "
+              >
+            </div>
+          {% endif %}
+          {% if slide.text %}
+            <div style="font-size:15px; line-height:1.6; white-space:pre-line;">{{ slide.text }}</div>
+          {% endif %}
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+
+    <div style="margin-top:24px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:16px;">
+        <div style="display:flex; gap:10px;">
+          <button id="training-prev" class="btn btn-outline-secondary" disabled>Назад</button>
+          <button id="training-next" class="btn btn-primary">Далее</button>
+          <button id="training-finish" class="btn btn-success" style="display:none;">Завершить материал</button>
+        </div>
+        <span id="training-counter" style="font-size:14px; color:#6c757d;">
+          Шаг 1 из {{ total_slides }}
+        </span>
+      </div>
+      <div style="margin-top:8px; font-size:13px; color:#9aa0a6;">
+        Нажимайте «Далее», чтобы перейти к следующему шагу инструкции.
+      </div>
+    </div>
+  </div>
+
+  <div id="training-complete-message" style="display:none; margin-top:25px;">
+    <h3>Материал пройден!</h3>
+    <p>Отличная работа. Вы можете выбрать следующую инструкцию на странице <a href="/training/">обучения</a>.</p>
+  </div>
+
+  <script>
+    (function() {
+      const container = document.getElementById('training-viewer');
+      if (!container) return;
+
+      const slides = Array.from(document.querySelectorAll('.training-slide'));
+      if (!slides.length) return;
+
+      let current = 0;
+      const total = slides.length;
+      const btnPrev = document.getElementById('training-prev');
+      const btnNext = document.getElementById('training-next');
+      const btnFinish = document.getElementById('training-finish');
+      const counter = document.getElementById('training-counter');
+      const bar = document.getElementById('training-progress-bar');
+      const text = document.getElementById('training-progress-text');
+      const completeMessage = document.getElementById('training-complete-message');
+
+      function updateUI() {
+        slides.forEach((el, idx) => {
+          const active = idx === current;
+          el.style.opacity = active ? '1' : '0';
+          el.style.pointerEvents = active ? 'auto' : 'none';
+        });
+
+        const humanIndex = current + 1;
+        const percent = Math.round((humanIndex / total) * 100);
+        if (bar) bar.style.width = percent + '%';
+        if (text) text.textContent = percent + '% пройдено (' + humanIndex + ' из ' + total + ' шагов)';
+        if (counter) counter.textContent = 'Шаг ' + humanIndex + ' из ' + total;
+
+        btnPrev.disabled = current === 0;
+        btnNext.style.display = current < total - 1 ? 'inline-block' : 'none';
+        btnFinish.style.display = current === total - 1 ? 'inline-block' : 'none';
+      }
+
+      function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+          const cookies = document.cookie.split(';');
+          for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+              cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+              break;
+            }
+          }
+        }
+        return cookieValue;
+      }
+
+      function sendProgress(isCompleted) {
+        const materialId = container.getAttribute('data-material-id');
+        if (!materialId) return;
+
+        const csrftoken = getCookie('csrftoken');
+        fetch('/api/training/progress/', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrftoken || '',
+          },
+          body: JSON.stringify({
+            material: parseInt(materialId, 10),
+            completed_slides: isCompleted ? total : (current + 1),
+            total_slides: total,
+            is_completed: !!isCompleted,
+          }),
+        }).catch(function() {});
+      }
+
+      btnPrev.addEventListener('click', function() {
+        if (current > 0) {
+          current -= 1;
+          updateUI();
+          sendProgress(false);
+        }
+      });
+
+      btnNext.addEventListener('click', function() {
+        if (current < total - 1) {
+          current += 1;
+          updateUI();
+          sendProgress(false);
+        }
+      });
+
+      btnFinish.addEventListener('click', function() {
+        sendProgress(true);
+        if (completeMessage) {
+          completeMessage.style.display = 'block';
+        }
+      });
+
+      updateUI();
+    })();
+  </script>
+{% else %}
+  <div class="card">
+    <div class="card-body">
+      {% if pdf_url %}
+        <script src="{% static 'training/pdf_page_viewer.js' %}"></script>
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+          <h5 class="mb-0">PDF-материал</h5>
+          <div class="d-flex gap-2">
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="matPdfBtnOpenTab">
+              <i class="bi bi-box-arrow-up-right"></i> Открыть в новой вкладке
+            </button>
+            <a class="btn btn-primary btn-sm" id="matPdfDownload" href="{{ pdf_url }}" download>
+              <i class="bi bi-download"></i> Скачать
+            </a>
+          </div>
+        </div>
+        <div id="matPdfFsTarget" class="d-flex flex-column rounded-4 border shadow-sm bg-body overflow-hidden" style="min-height: calc(100vh - 280px);">
+          <div class="d-flex justify-content-end align-items-center gap-2 px-2 py-1 border-bottom bg-light">
+            <button type="button" class="btn btn-sm btn-outline-secondary border-0" id="matPdfBtnPrint" title="Печать">
+              <i class="bi bi-printer"></i>
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary border-0" id="matPdfBtnFs" title="На весь экран">
+              <i class="bi bi-arrows-fullscreen"></i>
+            </button>
+          </div>
+          <div id="matPdfCanvasWrap" class="flex-grow-1 position-relative d-flex align-items-center justify-content-center training-pdf-backdrop" style="min-height: calc(100vh - 360px);">
+            <canvas id="matPdfCanvas" class="bg-white shadow"></canvas>
+            <div id="matPdfLoading" class="position-absolute small text-muted">Загрузка PDF…</div>
+          </div>
+          <div class="d-flex justify-content-center align-items-center gap-3 py-3 px-2 border-top bg-body">
+            <button type="button" class="btn btn-light border rounded-circle shadow-sm" id="matPdfBtnPrev" style="width:44px;height:44px;" aria-label="Предыдущая страница">
+              <i class="bi bi-chevron-left fs-5"></i>
+            </button>
+            <span id="matPdfPageLabel" class="fw-semibold text-secondary user-select-none" style="min-width: 6rem; text-align:center;">— / —</span>
+            <button type="button" class="btn btn-light border rounded-circle shadow-sm" id="matPdfBtnNext" style="width:44px;height:44px;" aria-label="Следующая страница">
+              <i class="bi bi-chevron-right fs-5"></i>
+            </button>
+          </div>
+        </div>
+        <div class="text-muted small mt-2">
+          Листайте страницы кнопками. Если PDF не отображается, откройте в новой вкладке или скачайте файл.
+        </div>
+        <script>
+          (function () {
+            var pdfUrl = "{{ pdf_url|escapejs }}";
+            var materialId = {{ material.id }};
+            if (!pdfUrl || typeof TrainingPdfPageViewer === "undefined") return;
+
+            document.getElementById("matPdfBtnOpenTab").addEventListener("click", function () {
+              window.open(pdfUrl, "_blank", "noopener,noreferrer");
+            });
+            document.getElementById("matPdfBtnPrint").addEventListener("click", function () {
+              var w = window.open(pdfUrl, "_blank", "noopener,noreferrer");
+              if (w) w.onload = function () { try { w.print(); } catch (e) {} };
+            });
+
+            var viewer = new TrainingPdfPageViewer({
+              pdfUrl: pdfUrl,
+              canvas: document.getElementById("matPdfCanvas"),
+              wrap: document.getElementById("matPdfCanvasWrap"),
+              loadingEl: document.getElementById("matPdfLoading"),
+              pageLabelEl: document.getElementById("matPdfPageLabel"),
+              btnPrev: document.getElementById("matPdfBtnPrev"),
+              btnNext: document.getElementById("matPdfBtnNext"),
+              btnFs: document.getElementById("matPdfBtnFs"),
+              fsTarget: document.getElementById("matPdfFsTarget"),
+              onPageChange: function (cur, tot) {
+                function getCookie(name) {
+                  var v = null;
+                  if (document.cookie && document.cookie !== "") {
+                    var parts = document.cookie.split(";");
+                    for (var i = 0; i < parts.length; i++) {
+                      var c = parts[i].trim();
+                      if (c.substring(0, name.length + 1) === name + "=") {
+                        v = decodeURIComponent(c.substring(name.length + 1));
+                        break;
+                      }
+                    }
+                  }
+                  return v;
+                }
+                if (!tot) return;
+                fetch("/api/training/progress/", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRFToken": getCookie("csrftoken") || "",
+                  },
+                  body: JSON.stringify({
+                    material: materialId,
+                    completed_slides: cur,
+                    total_slides: tot,
+                    is_completed: false,
+                  }),
+                }).catch(function () {});
+              },
+            });
+            viewer.init();
+          })();
+        </script>
+      {% else %}
+        <h5 class="mb-3">Содержимое материала</h5>
+        {% if material.content %}
+          <div style="white-space:pre-line; line-height:1.7;">{{ material.content }}</div>
+        {% else %}
+          <p class="text-muted mb-0">Для этого материала еще не добавлены шаги или текст.</p>
+        {% endif %}
+      {% endif %}
+    </div>
+  </div>
+{% endif %}
+{% endblock %}
+

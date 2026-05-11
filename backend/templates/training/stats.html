@@ -1,0 +1,139 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row">
+  <div class="col-md-10 offset-md-1">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <div>
+        <h2 class="mb-1 fw-bold">
+          <i class="bi bi-graph-up text-primary"></i> Статистика обучения сотрудников
+        </h2>
+        <p class="text-muted mb-0">Прогресс по материалам и результаты тестов.</p>
+      </div>
+      <a href="/training/" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> К обучению
+      </a>
+    </div>
+
+    <div class="card card-shadow">
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover mb-0 align-middle">
+            <thead>
+              <tr>
+                <th><i class="bi bi-person"></i> Сотрудник</th>
+                <th><i class="bi bi-bar-chart"></i> Прогресс</th>
+                <th><i class="bi bi-clipboard-check"></i> Материалы</th>
+                <th style="width: 40%;"><i class="bi bi-question-circle"></i> Попытки тестов</th>
+              </tr>
+            </thead>
+            <tbody id="trainingStatsBody">
+              <tr>
+                <td colspan="4" class="text-center text-muted py-4">
+                  <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+                  Загрузка статистики...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    loadTrainingStats();
+  });
+
+  async function loadTrainingStats() {
+    const tbody = document.getElementById('trainingStatsBody');
+    try {
+      const res = await fetch('/api/training/stats/', { headers: { 'X-CSRFToken': window.getCSRF() } });
+      if (!res.ok) {
+        const errText = await res.text();
+        console.error('Ошибка загрузки статистики', errText);
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-danger py-4">Не удалось загрузить статистику.</td></tr>';
+        return;
+      }
+      const data = await res.json();
+      if (!Array.isArray(data) || data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">Пока нет данных по обучению.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = data.map(row => renderStatsRow(row)).join('');
+    } catch (e) {
+      console.error('Ошибка статистики', e);
+      tbody.innerHTML = '<tr><td colspan="4" class="text-center text-danger py-4">Ошибка загрузки статистики.</td></tr>';
+    }
+  }
+
+  function esc(s) {
+    if (s === undefined || s === null) return '';
+    const d = document.createElement('div');
+    d.textContent = String(s);
+    return d.innerHTML;
+  }
+
+  function renderStatsRow(row) {
+    const attempts = row.attempts || [];
+    const attemptsHtml = attempts.length === 0
+      ? '<span class="text-muted small">Попыток ещё не было</span>'
+      : attempts.map(a => {
+          const date = new Date(a.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+          const statusBadge = a.passed
+            ? '<span class="badge bg-success ms-1">пройден</span>'
+            : '<span class="badge bg-danger ms-1">не пройден</span>';
+          const mat = a.material_title ? esc(a.material_title) : ('#' + a.material);
+          const attemptNo = a.attempt_index != null ? `<span class="badge bg-secondary ms-1">попытка ${a.attempt_index}</span>` : '';
+          const bd = Array.isArray(a.breakdown) ? a.breakdown : [];
+          const details = bd.length ? `
+            <details class="mt-1 ms-1 border-start border-2 ps-2 border-opacity-25">
+              <summary class="text-primary" style="cursor:pointer;font-size:12px;">Ответы по вопросам (${bd.length})</summary>
+              <div class="mt-1 small" style="max-height:200px;overflow-y:auto;">
+                ${bd.map(b => {
+                  const ok = b.ok ? '<span class="text-success">верно</span>' : '<span class="text-danger fw-semibold">ошибка</span>';
+                  const summ = esc(b.user_answer_summary || '—');
+                  const qt = esc(b.question_type || '');
+                  const qtxt = esc((b.text || '').slice(0, 120));
+                  return `<div class="mb-1 pb-1 border-bottom border-light"><span class="text-muted">#${b.question_order}</span> [${qt}] ${ok}<div class="text-muted" style="font-size:11px;">${qtxt}</div><div>${summ}</div></div>`;
+                }).join('')}
+              </div>
+            </details>` : '';
+          return `
+            <div class="small mb-2 pb-2 border-bottom border-light">
+              <div><strong>${date}</strong> ${attemptNo} · <span class="text-muted">${mat}</span></div>
+              <div>${a.score}/${a.max_score} (${a.percent}%) ${statusBadge}</div>
+              ${details}
+            </div>
+          `;
+        }).join('');
+
+    return `
+      <tr>
+        <td>
+          <div class="fw-semibold">${row.full_name}</div>
+          <div class="text-muted small">@${row.username}</div>
+        </td>
+        <td style="width: 180px;">
+          <div class="d-flex align-items-center gap-2">
+            <div class="progress flex-grow-1" style="height: 6px;">
+              <div class="progress-bar bg-success" role="progressbar" style="width: ${row.percent}%;"></div>
+            </div>
+            <span class="small text-muted">${row.percent}%</span>
+          </div>
+        </td>
+        <td>
+          <div class="small text-muted">
+            Завершено материалов: <strong>${row.completed_materials}</strong> из <strong>${row.total_materials}</strong>
+          </div>
+        </td>
+        <td>${attemptsHtml}</td>
+      </tr>
+    `;
+  }
+</script>
+
+{% endblock %}
+
