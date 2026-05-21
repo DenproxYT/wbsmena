@@ -13,7 +13,16 @@ SECRET_KEY = 'replace-me-with-secure-key'
 
 DEBUG = False
 
-ALLOWED_HOSTS = ["194.226.165.250", "smenawb.mooo.com", "localhost", "127.0.0.1"]
+_default_hosts = (
+    "194.226.165.250,"
+    "smenawb.mooo.com,"
+    "smenawb.duckdns.org,"
+    "localhost,"
+    "127.0.0.1"
+)
+ALLOWED_HOSTS = [
+    h.strip() for h in os.environ.get("ALLOWED_HOSTS", _default_hosts).split(",") if h.strip()
+]
 
 INSTALLED_APPS = [
     'django.contrib.admin',

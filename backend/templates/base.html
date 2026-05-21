@@ -106,33 +106,158 @@
       }
 
       /* Навигация */
-      .navbar {
+      .navbar-app {
         background: var(--card-bg) !important;
         box-shadow: var(--shadow-sm);
         border-bottom: 1px solid var(--border-color);
-        padding: 1rem 0;
+        padding: 0.5rem 0;
+        min-height: 3.25rem;
       }
 
-      .navbar-brand {
-        font-weight: 800;
-        font-size: 1.5rem;
+      .navbar-app .navbar-brand {
+        font-weight: 700;
+        font-size: 1.15rem;
+        padding: 0.25rem 0;
+        margin-right: 0.5rem;
         background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
+        white-space: nowrap;
       }
 
-      .nav-link {
+      .navbar-app .navbar-brand .bi {
+        -webkit-text-fill-color: var(--primary-color);
+        margin-right: 0.15rem;
+      }
+
+      .navbar-app .navbar-nav {
+        align-items: center;
+        gap: 0.15rem;
+      }
+
+      .navbar-app .nav-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
         font-weight: 500;
+        font-size: 0.875rem;
         color: var(--text-secondary) !important;
-        padding: 0.5rem 1rem !important;
+        padding: 0.4rem 0.65rem !important;
         border-radius: 8px;
-        margin: 0 0.25rem;
+        margin: 0;
+        white-space: nowrap;
+        line-height: 1.2;
       }
 
-      .nav-link:hover {
+      .navbar-app .nav-link .bi {
+        margin-right: 0 !important;
+        font-size: 1.05rem;
+        flex-shrink: 0;
+      }
+
+      .navbar-app .nav-link:hover,
+      .navbar-app .nav-link:focus {
         background: var(--light-bg);
         color: var(--primary-color) !important;
+      }
+
+      .navbar-app .nav-link-icon {
+        padding: 0.4rem 0.55rem !important;
+        position: relative;
+      }
+
+      .navbar-app .nav-badge {
+        position: absolute;
+        top: 0.15rem;
+        right: 0.1rem;
+        font-size: 0.6rem;
+        min-width: 1rem;
+        height: 1rem;
+        line-height: 1rem;
+        padding: 0 0.25rem;
+      }
+
+      .navbar-app .nav-divider {
+        width: 1px;
+        height: 1.5rem;
+        background: var(--border-color);
+        margin: 0 0.35rem;
+        align-self: center;
+      }
+
+      .navbar-app .navbar-user-block {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding-left: 0.35rem;
+        margin-left: 0.25rem;
+        border-left: 1px solid var(--border-color);
+      }
+
+      .navbar-app .navbar-user-name {
+        font-size: 0.875rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        max-width: 8rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .navbar-app .btn-nav-ghost {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 2.125rem;
+        height: 2.125rem;
+        padding: 0;
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+        background: transparent;
+        color: var(--text-secondary);
+      }
+
+      .navbar-app .btn-nav-ghost:hover {
+        border-color: var(--primary-color);
+        color: var(--primary-color);
+        background: var(--light-bg);
+      }
+
+      .navbar-app .dropdown-menu {
+        font-size: 0.875rem;
+        border-radius: 10px;
+        padding: 0.35rem;
+      }
+
+      .navbar-app .dropdown-item {
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.45rem 0.75rem;
+      }
+
+      .navbar-app .dropdown-item .bi {
+        margin-right: 0 !important;
+        opacity: 0.85;
+      }
+
+      @media (max-width: 991.98px) {
+        .navbar-app .navbar-collapse {
+          padding: 0.75rem 0 0.25rem;
+        }
+        .navbar-app .navbar-user-block {
+          border-left: none;
+          padding-left: 0;
+          margin-left: 0;
+          margin-top: 0.5rem;
+          padding-top: 0.5rem;
+          border-top: 1px solid var(--border-color);
+        }
+        .navbar-app .nav-divider {
+          display: none;
+        }
       }
 
       /* Hero секция */
@@ -708,35 +833,21 @@
         background: #64748b;
       }
 
-      .btn-theme-toggle {
-        border-radius: 10px;
-        width: 2.5rem;
-        height: 2.5rem;
-        padding: 0;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        border: 2px solid var(--border-color);
-        background: var(--card-bg);
-        color: var(--text-secondary);
-      }
-
-      .btn-theme-toggle:hover {
-        color: var(--primary-color);
-        border-color: var(--primary-color);
-        background: var(--light-bg);
-      }
-
-      [data-bs-theme="dark"] .btn-theme-toggle {
+      [data-bs-theme="dark"] .navbar-app .btn-nav-ghost {
         background: #0f172a;
         border-color: #475569;
         color: #cbd5e1;
       }
 
-      [data-bs-theme="dark"] .btn-theme-toggle:hover {
+      [data-bs-theme="dark"] .navbar-app .btn-nav-ghost:hover {
         color: #e0e7ff;
         border-color: var(--primary-light);
         background: #1e293b;
+      }
+
+      [data-bs-theme="dark"] .navbar-app .nav-divider,
+      [data-bs-theme="dark"] .navbar-app .navbar-user-block {
+        border-color: var(--border-color);
       }
     </style>
   </head>
@@ -749,92 +860,82 @@
     </div>
     <style>@keyframes appLoadSpin{to{transform:rotate(360deg);}}</style>
     <div class="site-wrapper">
-    <nav class="navbar navbar-expand-lg">
+    <nav class="navbar navbar-expand-lg navbar-app">
       <div class="container">
         <a class="navbar-brand" href="/">
           <i class="bi bi-calendar-check"></i> Смена WB
         </a>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMenu">
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMenu" aria-controls="navMenu" aria-expanded="false" aria-label="Меню">
           <span class="navbar-toggler-icon"></span>
         </button>
         <div class="collapse navbar-collapse" id="navMenu">
-          <ul class="navbar-nav ms-auto mb-2 mb-lg-0">
+          <ul class="navbar-nav ms-auto align-items-lg-center">
             {% if request.user.is_authenticated %}
             <li class="nav-item">
-              <a class="nav-link" href="/training/">
-                <i class="bi bi-book"></i> Обучение
-              </a>
+              <a class="nav-link" href="/training/"><i class="bi bi-book"></i><span>Обучение</span></a>
             </li>
             <li class="nav-item">
-              <a class="nav-link" href="/schedule/">
-                <i class="bi bi-calendar3"></i> График
-              </a>
+              <a class="nav-link" href="/schedule/"><i class="bi bi-calendar3"></i><span>График</span></a>
             </li>
             <li class="nav-item">
-              <a class="nav-link" href="/feedback/">
-                <i class="bi bi-chat-dots"></i> Обратная связь
-              </a>
+              <a class="nav-link" href="/feedback/"><i class="bi bi-chat-dots"></i><span>Отзыв</span></a>
             </li>
             <li class="nav-item dropdown" id="notifNavItem">
-              <a class="nav-link position-relative" href="#" id="notifDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+              <a class="nav-link nav-link-icon" href="#" id="notifDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false" title="Уведомления">
                 <i class="bi bi-bell"></i>
-                <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" id="notifBadge" style="display:none;font-size:0.65rem;">0</span>
+                <span class="badge rounded-pill bg-danger nav-badge" id="notifBadge" style="display:none;">0</span>
               </a>
-              <ul class="dropdown-menu dropdown-menu-end shadow" style="min-width:320px;max-height:400px;overflow-y:auto" id="notifList">
-                <li class="dropdown-header d-flex justify-content-between align-items-center">
+              <ul class="dropdown-menu dropdown-menu-end shadow" style="min-width:300px;max-height:360px;overflow-y:auto" id="notifList">
+                <li class="dropdown-header d-flex justify-content-between align-items-center py-2">
                   <span>Уведомления</span>
-                  <button type="button" class="btn btn-link btn-sm p-0" id="notifReadAll">Прочитать все</button>
+                  <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" id="notifReadAll">Все прочитаны</button>
                 </li>
-                <li><hr class="dropdown-divider"></li>
+                <li><hr class="dropdown-divider my-1"></li>
                 <li class="px-3 py-2 text-muted small" id="notifEmpty">Нет уведомлений</li>
               </ul>
             </li>
             {% if is_accounts_admin|default:False %}
-            <li class="nav-item">
-              <a class="nav-link" href="/notifications/send/">
-                <i class="bi bi-megaphone"></i> Рассылка
+            <li class="nav-item d-none d-lg-block"><span class="nav-divider" aria-hidden="true"></span></li>
+            <li class="nav-item dropdown">
+              <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                <i class="bi bi-gear"></i><span>Админ</span>
               </a>
-            </li>
-            <li class="nav-item">
-              <a class="nav-link" href="/feedback/admin/">
-                <i class="bi bi-inbox"></i> Обращения
-              </a>
-            </li>
-            <li class="nav-item">
-              <a class="nav-link" href="/schedule/household-requests/">
-                <i class="bi bi-box-seam"></i> Хоз.нужды
-              </a>
-            </li>
-            <li class="nav-item">
-              <a class="nav-link" href="/accounts/employees/">
-                <i class="bi bi-people"></i> Сотрудники
-              </a>
+              <ul class="dropdown-menu dropdown-menu-end shadow">
+                <li><a class="dropdown-item" href="/accounts/employees/"><i class="bi bi-people"></i> Сотрудники</a></li>
+                <li><a class="dropdown-item" href="/notifications/send/"><i class="bi bi-megaphone"></i> Рассылка</a></li>
+                <li><a class="dropdown-item" href="/feedback/admin/"><i class="bi bi-inbox"></i> Обращения</a></li>
+                <li><a class="dropdown-item" href="/schedule/household-requests/"><i class="bi bi-box-seam"></i> Хоз.нужды</a></li>
+                <li><hr class="dropdown-divider my-1"></li>
+                <li><a class="dropdown-item" href="/admin/"><i class="bi bi-sliders"></i> Django admin</a></li>
+              </ul>
             </li>
             {% endif %}
-            {% endif %}
-            <li class="nav-item d-flex align-items-center me-2">
-              <button type="button" class="btn btn-theme-toggle" id="themeToggle" title="Тёмная тема" aria-label="Переключить светлую или тёмную тему">
+            <li class="nav-item d-none d-lg-block"><span class="nav-divider" aria-hidden="true"></span></li>
+            <li class="nav-item">
+              <div class="navbar-user-block">
+                <button type="button" class="btn btn-nav-ghost btn-theme-toggle" id="themeToggle" title="Тема" aria-label="Переключить тему">
+                  <i class="bi bi-moon-stars-fill" id="themeToggleIcon" aria-hidden="true"></i>
+                </button>
+                <span class="navbar-user-name" title="{% if request.user.get_full_name %}{{ request.user.get_full_name }}{% else %}{{ request.user.username }}{% endif %}">
+                  {% if request.user.get_full_name %}{{ request.user.get_full_name }}{% else %}{{ request.user.username }}{% endif %}
+                </span>
+                <a class="btn btn-nav-ghost" href="/accounts/logout/" title="Выйти" aria-label="Выйти">
+                  <i class="bi bi-box-arrow-right"></i>
+                </a>
+              </div>
+            </li>
+            {% else %}
+            <li class="nav-item">
+              <button type="button" class="btn btn-nav-ghost btn-theme-toggle me-1" id="themeToggle" title="Тема" aria-label="Переключить тему">
                 <i class="bi bi-moon-stars-fill" id="themeToggleIcon" aria-hidden="true"></i>
               </button>
             </li>
-            <li class="nav-item d-flex align-items-center ms-3">
-              {% if request.user.is_authenticated %}
-                <div class="d-flex align-items-center">
-                  <div class="me-3">
-                    <span class="text-muted">Привет,</span>
-                    <strong class="text-primary">{% if request.user.get_full_name %}{{ request.user.get_full_name }}{% else %}{{ request.user.username }}{% endif %}</strong>
-                  </div>
-                  <a class="btn btn-outline-secondary btn-sm" href="/accounts/logout/">
-                    <i class="bi bi-box-arrow-right"></i> Выйти
-                  </a>
-                </div>
-              {% else %}
-                <span class="text-muted me-2">Аккаунт выдает администратор</span>
-                <a class="btn btn-primary" href="/accounts/login/">
-                  <i class="bi bi-box-arrow-in-right"></i> Войти
-                </a>
-              {% endif %}
+            <li class="nav-item">
+              <a class="btn btn-primary btn-sm px-3" href="/accounts/login/">
+                <i class="bi bi-box-arrow-in-right"></i> Войти
+              </a>
             </li>
+            {% endif %}
           </ul>
         </div>
       </div>
