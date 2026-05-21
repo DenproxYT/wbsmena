@@ -71,6 +71,14 @@ class FirstLoginCredentialsSerializer(serializers.Serializer):
     current_password = serializers.CharField(write_only=True)
     new_username = serializers.CharField(max_length=150)
     new_password = serializers.CharField(write_only=True, min_length=6)
+    pvz_address = serializers.CharField(max_length=255, required=False, allow_blank=True)
+
+    def validate_pvz_address(self, value):
+        from apps.schedule.constants import PVZ_ADDRESSES
+        value = (value or '').strip()
+        if value and value not in PVZ_ADDRESSES:
+            raise serializers.ValidationError('Выберите ПВЗ из списка')
+        return value
 
     def validate_new_username(self, value):
         user = self.context["request"].user

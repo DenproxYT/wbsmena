@@ -1,0 +1,57 @@
+{% extends 'base.html' %}
+{% block title %}Уведомления — Смена WB{% endblock %}
+{% block content %}
+<div class="row justify-content-center fade-in">
+  <div class="col-md-8">
+    <div class="card card-shadow p-4">
+      <h3 class="mb-2"><i class="bi bi-megaphone text-primary"></i> Рассылка сотрудникам</h3>
+      <p class="text-muted">Сообщение появится у всех активных сотрудников в колокольчике уведомлений.</p>
+      <div class="d-flex flex-wrap gap-2 mb-3">
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="fillPreset('schedule')">Заполнить график</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="fillPreset('open')">График открыт</button>
+      </div>
+      <form id="broadcastForm">
+        <div class="mb-3">
+          <label class="form-label">Заголовок</label>
+          <input class="form-control" id="nTitle" required maxlength="200">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Текст</label>
+          <textarea class="form-control" id="nMessage" rows="4" required></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary"><i class="bi bi-send"></i> Отправить всем</button>
+      </form>
+      <div id="nMsg" class="mt-3"></div>
+    </div>
+  </div>
+</div>
+<script>
+function fillPreset(kind) {
+  if (kind === 'schedule') {
+    document.getElementById('nTitle').value = 'Заполните график на следующий месяц';
+    document.getElementById('nMessage').value = 'Пожалуйста, заполните график смен на следующий месяц в разделе «График».';
+  } else {
+    document.getElementById('nTitle').value = 'График открыт для проставления смен';
+    document.getElementById('nMessage').value = 'Администратор открыл график — можно проставлять смены.';
+  }
+}
+document.getElementById('broadcastForm').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  const res = await fetch('/api/core/notifications/broadcast/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': window.getCSRF() },
+    body: JSON.stringify({
+      title: document.getElementById('nTitle').value.trim(),
+      message: document.getElementById('nMessage').value.trim()
+    })
+  });
+  const data = await res.json().catch(() => ({}));
+  const el = document.getElementById('nMsg');
+  if (res.ok) {
+    el.innerHTML = '<div class="alert alert-success">Отправлено сотрудникам: ' + (data.recipients || 0) + '</div>';
+  } else {
+    el.innerHTML = '<div class="alert alert-danger">' + (data.detail || JSON.stringify(data)) + '</div>';
+  }
+});
+</script>
+{% endblock %}

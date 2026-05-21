@@ -90,14 +90,16 @@ class ProfilePageView(View):
     def get(self, request):
         if not request.user.is_authenticated:
             return redirect('/accounts/login/?next=/accounts/profile/')
-        return render(request, 'accounts/profile.html')
+        from apps.schedule.constants import PVZ_ADDRESSES
+        return render(request, 'accounts/profile.html', {'pvz_list': PVZ_ADDRESSES})
 
 
 class FirstLoginPageView(View):
     def get(self, request):
         if not request.user.is_authenticated:
             return redirect('/accounts/login/?next=/accounts/first-login/')
-        return render(request, 'accounts/first_login.html')
+        from apps.schedule.constants import PVZ_ADDRESSES
+        return render(request, 'accounts/first_login.html', {'pvz_list': PVZ_ADDRESSES})
 
 
 class EmployeesPageView(View):
@@ -255,6 +257,9 @@ class FirstLoginCredentialsView(APIView):
 
         request.user.username = serializer.validated_data["new_username"]
         request.user.set_password(serializer.validated_data["new_password"])
+        pvz = (serializer.validated_data.get("pvz_address") or "").strip()
+        if pvz:
+            request.user.pvz_address = pvz
         request.user.must_change_credentials = False
         request.user.save()
         auth_login(request, request.user)

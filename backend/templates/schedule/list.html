@@ -10,9 +10,14 @@
         </h2>
         <p class="text-muted mb-0">Управление рабочими сменами сотрудников</p>
       </div>
-      <button class="btn btn-primary btn-lg" data-bs-toggle="modal" data-bs-target="#scheduleModal" onclick="openCreateModal()">
-        <i class="bi bi-plus-circle"></i> Создать смену
-      </button>
+      <div class="d-flex flex-wrap gap-2">
+        <button type="button" class="btn btn-outline-primary btn-lg" data-bs-toggle="modal" data-bs-target="#householdModal">
+          <i class="bi bi-box-seam"></i> Заявка на хоз.нужды
+        </button>
+        <button type="button" class="btn btn-primary btn-lg" id="btnCreateShift" data-bs-toggle="modal" data-bs-target="#scheduleModal" onclick="openCreateModal()">
+          <i class="bi bi-plus-circle"></i> Создать смену
+        </button>
+      </div>
     </div>
 
     <!-- Фильтры -->
@@ -22,11 +27,7 @@
           <label class="form-label mb-1">
             <i class="bi bi-calendar-month"></i> Месяц
           </label>
-          <select class="form-select" id="monthFilter" onchange="loadSchedule()">
-            <option id="monthOpt1" value=""></option>
-            <option id="monthOpt2" value=""></option>
-          </select>
-
+          <select class="form-select" id="monthFilter" onchange="onMonthFilterChange()"></select>
         </div>
         {% if is_schedule_admin %}
         <div class="col-md-3">
@@ -60,6 +61,19 @@
         </div>
         {% endif %}
       </div>
+      <div id="periodStatusBanner" class="alert alert-warning mt-3 mb-0 d-none" role="alert"></div>
+      {% if is_schedule_admin %}
+      <div class="mt-3 d-flex flex-wrap align-items-center gap-2" id="adminPeriodControls">
+        <span class="text-muted small">Проставление смен для выбранного месяца:</span>
+        <span id="periodOpenBadge" class="badge bg-secondary">—</span>
+        <button type="button" class="btn btn-sm btn-success" id="btnPeriodOpen" onclick="toggleSchedulePeriod(true)">
+          <i class="bi bi-unlock"></i> Открыть
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-danger" id="btnPeriodClose" onclick="toggleSchedulePeriod(false)">
+          <i class="bi bi-lock"></i> Закрыть
+        </button>
+      </div>
+      {% endif %}
     </div>
 
     <!-- Итоги смен за период -->
@@ -291,6 +305,49 @@
   </div>
 </div>
 
+<!-- Заявка на хоз.нужды -->
+<div class="modal fade" id="householdModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-box-seam text-primary"></i> Заявка на хоз.нужды</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <form id="householdForm">
+          <div class="mb-3">
+            <label class="form-label">Пункт выдачи</label>
+            <select class="form-select" id="hhPvz" required>
+              <option value="">Выберите ПВЗ</option>
+              {% for pvz in pvz_list %}
+              <option value="{{ pvz }}">{{ pvz }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          {% for i in "12345" %}
+          <div class="mb-3">
+            <label class="form-label">Позиция {{ forloop.counter }}</label>
+            <select class="form-select hh-item">
+              <option value="">— не выбрано —</option>
+              {% for item in household_items %}
+              <option value="{{ item }}">{{ item }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          {% endfor %}
+        </form>
+        <div id="hhResult"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button type="button" class="btn btn-primary" onclick="submitHouseholdRequest()">
+          <i class="bi bi-send"></i> Отправить заявку
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 // Определить функцию getCSRF сразу, до любого использования
 (function() {
@@ -304,36 +361,25 @@
 })();
 
 // Глобальные переменные
-const now = new Date();
-const currentMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
-const nextMonthDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-const nextMonth = nextMonthDate.getFullYear() + '-' + String(nextMonthDate.getMonth() + 1).padStart(2, '0');
+let scheduleMonths = [];
+let isScheduleAdminUser = {{ is_schedule_admin|yesno:"true,false" }};
+let currentMonthOpen = true;
 let currentSchedule = [];
 let editingId = null;
 
-const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
-
 // Дождаться загрузки DOM перед инициализацией
 document.addEventListener('DOMContentLoaded', function() {
-  // Только текущий и следующий месяц
-  const monthFilter = document.getElementById('monthFilter');
-  const opt1 = document.getElementById('monthOpt1');
-  const opt2 = document.getElementById('monthOpt2');
-  if (monthFilter && opt1 && opt2) {
-    opt1.value = currentMonth;
-    opt1.textContent = monthNames[now.getMonth()] + ' ' + now.getFullYear();
-    opt2.value = nextMonth;
-    opt2.textContent = monthNames[nextMonthDate.getMonth()] + ' ' + nextMonthDate.getFullYear();
-    monthFilter.value = currentMonth;
+  const hhPvz = document.getElementById('hhPvz');
+  if (hhPvz) {
+    const def = "{{ user_pvz_address|escapejs }}";
+    if (def && hhPvz.querySelector('option[value="' + def + '"]')) hhPvz.value = def;
   }
-
-  // Загрузить список пользователей для админа/владельца
-  {% if is_schedule_admin %}
-  loadUsers();
-  {% endif %}
-  
-  // Загрузить график при загрузке страницы
-  loadSchedule();
+  loadScheduleMonths().then(function() {
+    {% if is_schedule_admin %}
+    loadUsers();
+    {% endif %}
+    loadSchedule();
+  });
   
   // Очистка формы импорта при открытии модального окна
   const importModal = document.getElementById('importModal');
@@ -689,9 +735,101 @@ function renderTable() {
   `).join('');
 }
 
+function getSelectedMonthMeta() {
+  const val = document.getElementById('monthFilter')?.value;
+  return scheduleMonths.find(m => m.value === val) || null;
+}
+
+function canWriteCurrentMonth() {
+  if (isScheduleAdminUser) return true;
+  const m = getSelectedMonthMeta();
+  return m ? !!m.is_open : false;
+}
+
+function updatePeriodUI() {
+  const m = getSelectedMonthMeta();
+  const open = m ? !!m.is_open : false;
+  currentMonthOpen = open;
+  const banner = document.getElementById('periodStatusBanner');
+  const btnCreate = document.getElementById('btnCreateShift');
+  if (banner) {
+    if (!isScheduleAdminUser && !open) {
+      banner.classList.remove('d-none');
+      banner.innerHTML = '<i class="bi bi-lock"></i> Проставление смен для этого месяца закрыто. Дождитесь открытия администратором.';
+    } else {
+      banner.classList.add('d-none');
+    }
+  }
+  if (btnCreate && !isScheduleAdminUser) {
+    btnCreate.disabled = !open;
+    btnCreate.title = open ? '' : 'Месяц закрыт для проставления смен';
+  }
+  {% if is_schedule_admin %}
+  const badge = document.getElementById('periodOpenBadge');
+  if (badge) badge.className = 'badge ' + (open ? 'bg-success' : 'bg-danger');
+  if (badge) badge.textContent = open ? 'Открыт' : 'Закрыт';
+  {% endif %}
+}
+
+async function loadScheduleMonths() {
+  try {
+    const res = await fetch('/api/schedule/months/');
+    if (!res.ok) return;
+    const data = await res.json();
+    scheduleMonths = data.months || [];
+    isScheduleAdminUser = !!data.is_admin;
+    const sel = document.getElementById('monthFilter');
+    if (!sel) return;
+    sel.innerHTML = '';
+    scheduleMonths.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m.value;
+      opt.textContent = m.label + (m.is_open ? '' : ' (закрыт)');
+      sel.appendChild(opt);
+    });
+    if (scheduleMonths.length) sel.value = scheduleMonths[0].value;
+    updatePeriodUI();
+  } catch (e) { console.error(e); }
+}
+
+function onMonthFilterChange() {
+  updatePeriodUI();
+  setDateLimits();
+  loadSchedule();
+}
+
+{% if is_schedule_admin %}
+async function toggleSchedulePeriod(open) {
+  const m = getSelectedMonthMeta();
+  if (!m) return;
+  const res = await fetch('/api/schedule/periods/' + m.year + '/' + m.month + '/toggle/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': window.getCSRF() },
+    body: JSON.stringify({ is_open: open })
+  });
+  if (res.ok) {
+    const p = await res.json();
+    const idx = scheduleMonths.findIndex(x => x.year === p.year && x.month === p.month);
+    if (idx >= 0) scheduleMonths[idx].is_open = p.is_open;
+    updatePeriodUI();
+    showAlert(open ? 'Месяц открыт для проставления смен' : 'Месяц закрыт', 'success');
+  } else {
+    const err = await res.json().catch(() => ({}));
+    showAlert(err.detail || 'Ошибка', 'danger');
+  }
+}
+{% endif %}
+
 function setDateLimits() {
   const d = document.getElementById('scheduleDate');
   if (!d) return;
+  const m = getSelectedMonthMeta();
+  if (m) {
+    const lastDay = new Date(m.year, m.month, 0).getDate();
+    d.min = m.year + '-' + String(m.month).padStart(2, '0') + '-01';
+    d.max = m.year + '-' + String(m.month).padStart(2, '0') + '-' + String(lastDay).padStart(2, '0');
+    return;
+  }
   const now = new Date();
   const firstCur = new Date(now.getFullYear(), now.getMonth(), 1);
   const lastNext = new Date(now.getFullYear(), now.getMonth() + 2, 0);
@@ -699,8 +837,48 @@ function setDateLimits() {
   d.max = lastNext.toISOString().slice(0, 10);
 }
 
+async function submitHouseholdRequest() {
+  const pvz = document.getElementById('hhPvz').value;
+  const items = Array.from(document.querySelectorAll('.hh-item')).map(s => s.value);
+  if (!pvz) {
+    document.getElementById('hhResult').innerHTML = '<div class="alert alert-danger">Выберите ПВЗ</div>';
+    return;
+  }
+  if (!items.some(Boolean)) {
+    document.getElementById('hhResult').innerHTML = '<div class="alert alert-danger">Выберите хотя бы одну позицию</div>';
+    return;
+  }
+  const res = await fetch('/api/schedule/household/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': window.getCSRF() },
+    body: JSON.stringify({
+      pvz_address: pvz,
+      item_1: items[0] || '',
+      item_2: items[1] || '',
+      item_3: items[2] || '',
+      item_4: items[3] || '',
+      item_5: items[4] || ''
+    })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) {
+    document.getElementById('hhResult').innerHTML = '<div class="alert alert-success">Заявка отправлена</div>';
+    document.getElementById('householdForm').reset();
+    const hhPvz = document.getElementById('hhPvz');
+    const def = "{{ user_pvz_address|escapejs }}";
+    if (hhPvz && def) hhPvz.value = def;
+    setTimeout(() => bootstrap.Modal.getInstance(document.getElementById('householdModal'))?.hide(), 800);
+  } else {
+    document.getElementById('hhResult').innerHTML = '<div class="alert alert-danger">' + (data.detail || JSON.stringify(data)) + '</div>';
+  }
+}
+
 // Открыть модальное окно для создания
 function openCreateModal() {
+  if (!canWriteCurrentMonth()) {
+    showAlert('Проставление смен для этого месяца закрыто', 'warning');
+    return;
+  }
   editingId = null;
   setDateLimits();
   document.getElementById('modalTitle').innerHTML = '<i class="bi bi-calendar-plus text-primary"></i> Создать смену';
@@ -721,6 +899,10 @@ function openCreateModal() {
 
 // Открыть модальное окно для редактирования по дате
 function openEditModal(dateStr, pvzAddr) {
+  if (!canWriteCurrentMonth() && !isScheduleAdminUser) {
+    showAlert('Проставление смен для этого месяца закрыто', 'warning');
+    return;
+  }
   const items = currentSchedule.filter(s => s.date === dateStr);
   const item = pvzAddr ? items.find(s => s.pvz_address === pvzAddr) : items[0];
   if (item) {

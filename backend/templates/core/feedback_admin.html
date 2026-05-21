@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+{% block title %}Обратная связь (админ) — Смена WB{% endblock %}
+{% block content %}
+<div class="fade-in">
+  <h3 class="mb-4"><i class="bi bi-inbox text-primary"></i> Обратная связь сотрудников</h3>
+  <div class="card card-shadow">
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead><tr>
+          <th>Дата</th><th>Сотрудник</th><th>Тип</th><th>Текст</th><th>Фото</th><th></th>
+        </tr></thead>
+        <tbody id="fbTable"><tr><td colspan="6" class="text-center text-muted py-4">Загрузка...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<script>
+async function loadFeedback() {
+  const res = await fetch('/api/core/feedback/');
+  const rows = res.ok ? await res.json() : [];
+  const tb = document.getElementById('fbTable');
+  if (!rows.length) {
+    tb.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Нет сообщений</td></tr>';
+    return;
+  }
+  tb.innerHTML = rows.map(r => `
+    <tr>
+      <td><small>${new Date(r.created_at).toLocaleString('ru-RU')}</small></td>
+      <td>${r.full_name || r.username}</td>
+      <td><span class="badge bg-secondary">${r.category_display}</span></td>
+      <td style="max-width:320px">${(r.comment || '').replace(/</g,'&lt;')}</td>
+      <td>${r.attachment ? '<a href="'+r.attachment+'" target="_blank">Открыть</a>' : '—'}</td>
+      <td>${r.status === 'new' ? '<button class="btn btn-sm btn-outline-primary" onclick="markRead('+r.id+')">Просмотрено</button>' : '<span class="text-muted">✓</span>'}</td>
+    </tr>
+  `).join('');
+}
+async function markRead(id) {
+  await fetch('/api/core/feedback/'+id+'/', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': window.getCSRF() },
+    body: JSON.stringify({ status: 'reviewed' })
+  });
+  loadFeedback();
+}
+loadFeedback();
+</script>
+{% endblock %}

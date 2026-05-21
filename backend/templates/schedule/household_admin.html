@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+{% block title %}Заявки на хоз.нужды — Смена WB{% endblock %}
+{% block content %}
+<div class="fade-in">
+  <h3 class="mb-4"><i class="bi bi-box-seam text-primary"></i> Заявки на хоз.нужды</h3>
+  <div class="card card-shadow">
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead>
+          <tr>
+            <th>Дата</th><th>Сотрудник</th><th>ПВЗ</th><th>Позиции</th>
+          </tr>
+        </thead>
+        <tbody id="hhTable"><tr><td colspan="4" class="text-center text-muted py-4">Загрузка...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<script>
+async function loadHousehold() {
+  const res = await fetch('/api/schedule/household/');
+  const rows = res.ok ? await res.json() : [];
+  const tb = document.getElementById('hhTable');
+  if (!rows.length) {
+    tb.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">Нет заявок</td></tr>';
+    return;
+  }
+  tb.innerHTML = rows.map(r => {
+    const items = [r.item_1, r.item_2, r.item_3, r.item_4, r.item_5].filter(Boolean).join('; ');
+    return `<tr>
+      <td><small>${new Date(r.created_at).toLocaleString('ru-RU')}</small></td>
+      <td>${r.username}</td>
+      <td><small>${r.pvz_address}</small></td>
+      <td>${items || '—'}</td>
+    </tr>`;
+  }).join('');
+}
+loadHousehold();
+</script>
+{% endblock %}

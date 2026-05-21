@@ -3,11 +3,17 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv(BASE_DIR / '.env')
+except ImportError:
+    pass
+
 SECRET_KEY = 'replace-me-with-secure-key'
 
-DEBUG = True
+DEBUG = False
 
-ALLOWED_HOSTS = [h.strip() for h in os.environ.get('DJANGO_ALLOWED_HOSTS', '127.0.0.1,localhost,0.0.0.0').split(',') if h.strip()]
+ALLOWED_HOSTS = ["194.226.165.250", "smenawb.mooo.com", "localhost", "127.0.0.1"]
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -20,6 +26,7 @@ INSTALLED_APPS = [
     'apps.accounts',
     'apps.schedule',
     'apps.training',
+    'apps.core',
 ]
 
 MIDDLEWARE = [
@@ -53,7 +60,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'pvz_site.wsgi.application'
 
-DB_ENGINE = os.environ.get("DB_ENGINE", "sqlite").lower()
+DB_ENGINE = os.environ.get("DB_ENGINE", "mysql").lower()
 
 if DB_ENGINE == "mysql":
     DATABASES = {
@@ -61,8 +68,8 @@ if DB_ENGINE == "mysql":
             "ENGINE": "django.db.backends.mysql",
             "NAME": os.environ.get("MYSQL_DATABASE", "pvz_db"),
             "USER": os.environ.get("MYSQL_USER", "pvz_user"),
-            "PASSWORD": os.environ.get("MYSQL_PASSWORD", "pvz_password"),
-            "HOST": os.environ.get("MYSQL_HOST", "mysql"),
+            "PASSWORD": os.environ.get("MYSQL_PASSWORD", "StrongPass_123"),
+            "HOST": os.environ.get("MYSQL_HOST", "127.0.0.1"),
             "PORT": os.environ.get("MYSQL_PORT", "3306"),
             "OPTIONS": {
                 "charset": "utf8mb4",
@@ -79,20 +86,24 @@ else:
 
 AUTH_PASSWORD_VALIDATORS = []
 
-LANGUAGE_CODE = 'ru-ru'
+LANGUAGE_CODE = 'ru'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Irkutsk'
 
 USE_I18N = True
 
 USE_TZ = True
 
 STATIC_URL = '/static/'
-STATICFILES_DIRS = [BASE_DIR / 'static']
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
-
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Custom user model
 AUTH_USER_MODEL = 'accounts.User'
+
+
+
+
+

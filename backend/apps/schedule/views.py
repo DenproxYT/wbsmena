@@ -6,13 +6,19 @@ from django.http import HttpResponse
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
-from datetime import datetime
+from datetime import datetime, date as date_type
 from calendar import monthrange
+from rest_framework.exceptions import PermissionDenied
 from decimal import Decimal, InvalidOperation
 import re
-from .models import Schedule
-from .serializers import ScheduleSerializer
+from .models import Schedule, HouseholdSupplyRequest
+from .serializers import ScheduleSerializer, HouseholdSupplyRequestSerializer
 from .constants import PVZ_ADDRESSES
+from .period_utils import (
+    check_schedule_write_allowed,
+    get_visible_months_for_user,
+    ensure_period,
+)
 
 User = get_user_model()
 
@@ -118,7 +124,17 @@ class ScheduleListCreateView(generics.ListCreateAPIView):
             queryset = queryset.filter(user=user)
         return queryset.order_by('-date', 'user__username')
 
+    def _assert_can_write(self, schedule_date):
+        if isinstance(schedule_date, str):
+            schedule_date = date_type.fromisoformat(schedule_date[:10])
+        ok, msg = check_schedule_write_allowed(
+            self.request.user, schedule_date, is_schedule_admin(self.request.user)
+        )
+        if not ok:
+            raise PermissionDenied(msg)
+
     def perform_create(self, serializer):
+        self._assert_can_write(serializer.validated_data['date'])
         user = self.request.user
         pvz = self.request.data.get('pvz_address', '').strip()
         if pvz and pvz in PVZ_ADDRESSES:
@@ -150,7 +166,13 @@ class ScheduleRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
             return Schedule.objects.all()
         return Schedule.objects.filter(user=user)
 
+    def perform_destroy(self, instance):
+        self._assert_can_write(instance.date)
+        instance.delete()
+
     def perform_update(self, serializer):
+        d = serializer.validated_data.get('date', serializer.instance.date)
+        self._assert_can_write(d)
         user = self.request.user
         pvz = self.request.data.get('pvz_address', '').strip()
         if pvz and pvz in PVZ_ADDRESSES:
@@ -886,3 +908,67 @@ class ScheduleImportView(APIView):
                 {'error': f'Ошибка при обработке файла: {str(e)}'}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class ScheduleMonthsView(APIView):
+    """Доступные месяцы и статус открытия для графика."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        admin = is_schedule_admin(request.user)
+        months = get_visible_months_for_user(request.user, admin)
+        return Response({
+            'months': months,
+            'is_admin': admin,
+        })
+
+
+class SchedulePeriodToggleView(APIView):
+    """Открыть/закрыть проставление смен для месяца (только админ)."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, year, month):
+        if not is_schedule_admin(request.user):
+            return Response({'detail': 'Нет доступа'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            year, month = int(year), int(month)
+            if month < 1 or month > 12:
+                raise ValueError
+        except (TypeError, ValueError):
+            return Response({'detail': 'Некорректный месяц'}, status=status.HTTP_400_BAD_REQUEST)
+
+        is_open = request.data.get('is_open')
+        if is_open is None:
+            period = ensure_period(year, month)
+            is_open = not period.is_open
+        else:
+            is_open = bool(is_open)
+
+        period = ensure_period(year, month)
+        period.is_open = is_open
+        period.updated_by = request.user
+        period.save(update_fields=['is_open', 'updated_by', 'updated_at'])
+
+        if is_open:
+            from apps.core.notification_service import broadcast_to_employees
+            from .period_utils import _month_label
+            label = _month_label(year, month)
+            broadcast_to_employees(
+                title=f'График открыт: {label}',
+                message=f'Администратор открыл проставление смен за {label}. Заполните график в разделе «График».',
+                created_by=request.user,
+            )
+
+        from .period_utils import _period_dict
+        return Response(_period_dict(period))
+
+
+class HouseholdSupplyRequestListCreateView(generics.ListCreateAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = HouseholdSupplyRequestSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        if is_schedule_admin(user):
+            return HouseholdSupplyRequest.objects.select_related('user').all()
+        return HouseholdSupplyRequest.objects.filter(user=user)

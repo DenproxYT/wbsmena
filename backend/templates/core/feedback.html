@@ -1,0 +1,56 @@
+{% extends 'base.html' %}
+{% block title %}Обратная связь — Смена WB{% endblock %}
+{% block content %}
+<div class="row justify-content-center fade-in">
+  <div class="col-md-8">
+    <div class="card card-shadow p-4">
+      <h3 class="mb-2"><i class="bi bi-chat-dots text-primary"></i> Обратная связь</h3>
+      <p class="text-muted">Сообщите о баге, пожелании или вопросе. При необходимости приложите скриншот (фото).</p>
+      <form id="feedbackForm" enctype="multipart/form-data">
+        <div class="mb-3">
+          <label class="form-label">Причина обращения</label>
+          <select class="form-select" id="fbCategory" required>
+            <option value="bug">Баг</option>
+            <option value="wish">Пожелания</option>
+            <option value="question">Вопрос</option>
+            <option value="other">Другое</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Комментарий</label>
+          <textarea class="form-control" id="fbComment" rows="5" required placeholder="Опишите подробно..."></textarea>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Вложение (фото, необязательно)</label>
+          <input type="file" class="form-control" id="fbPhoto" accept="image/*">
+        </div>
+        <button type="submit" class="btn btn-primary"><i class="bi bi-send"></i> Отправить</button>
+      </form>
+      <div id="fbMsg" class="mt-3"></div>
+    </div>
+  </div>
+</div>
+<script>
+document.getElementById('feedbackForm').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  const fd = new FormData();
+  fd.append('category', document.getElementById('fbCategory').value);
+  fd.append('comment', document.getElementById('fbComment').value.trim());
+  const photo = document.getElementById('fbPhoto').files[0];
+  if (photo) fd.append('attachment', photo);
+  const res = await fetch('/api/core/feedback/', {
+    method: 'POST',
+    headers: { 'X-CSRFToken': window.getCSRF() },
+    body: fd
+  });
+  const data = await res.json().catch(() => ({}));
+  const el = document.getElementById('fbMsg');
+  if (res.ok) {
+    el.innerHTML = '<div class="alert alert-success">Спасибо! Сообщение отправлено.</div>';
+    document.getElementById('feedbackForm').reset();
+  } else {
+    el.innerHTML = '<div class="alert alert-danger">' + (data.detail || JSON.stringify(data)) + '</div>';
+  }
+});
+</script>
+{% endblock %}

@@ -70,7 +70,12 @@
               </div>
             <div class="col-md-6">
               <label class="form-label">ПВЗ (место работы)</label>
-              <input type="text" class="form-control" id="ePvz" name="pvz_address">
+              <select class="form-select" id="ePvz" name="pvz_address">
+                <option value="">Выберите ПВЗ</option>
+                {% for pvz in pvz_list %}
+                <option value="{{ pvz }}">{{ pvz }}</option>
+                {% endfor %}
+              </select>
             </div>
             <div class="col-md-6">
               <label class="form-label">Роль</label>

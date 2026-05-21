@@ -28,6 +28,8 @@ class TrainingSlideAdmin(admin.ModelAdmin):
     def image_url_short(self, obj):
         return (obj.image_url or "")[:60]
 
+    image_url_short.short_description = 'Изображение'
+
 
 @admin.register(TrainingProgress)
 class TrainingProgressAdmin(admin.ModelAdmin):
