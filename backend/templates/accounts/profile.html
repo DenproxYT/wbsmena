@@ -68,22 +68,27 @@
                 <label class="form-label">Телефон</label>
                 <input type="text" class="form-control" id="ePhone" name="phone_number" placeholder="+7...">
               </div>
-            <div class="col-md-6">
-              <label class="form-label">ПВЗ (место работы)</label>
-              <select class="form-select" id="ePvz" name="pvz_address">
-                <option value="">Выберите ПВЗ</option>
-                {% for pvz in pvz_list %}
-                <option value="{{ pvz }}">{{ pvz }}</option>
-                {% endfor %}
-              </select>
+            <div id="pvzRoleEditBlock" class="row g-3 m-0 p-0">
+              <div class="col-md-6">
+                <label class="form-label">ПВЗ (место работы)</label>
+                <select class="form-select" id="ePvz" name="pvz_address">
+                  <option value="">Выберите ПВЗ</option>
+                  {% for pvz in pvz_list %}
+                  <option value="{{ pvz }}">{{ pvz }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Роль</label>
+                <select class="form-select" id="eRole" name="role">
+                  <option value="staff_manager">Штатный менеджер</option>
+                  <option value="intern">Стажёр</option>
+                  <option value="chief_manager">Главный менеджер</option>
+                </select>
+              </div>
             </div>
-            <div class="col-md-6">
-              <label class="form-label">Роль</label>
-              <select class="form-select" id="eRole" name="role">
-                <option value="staff_manager">Штатный менеджер</option>
-                <option value="intern">Стажёр</option>
-                <option value="chief_manager">Главный менеджер</option>
-              </select>
+            <div id="pvzRoleLockedHint" class="col-12 alert alert-info py-2 small d-none">
+              ПВЗ и роль заданы при первом входе. Для изменения обратитесь к администратору.
             </div>
             </div>
             <hr>
@@ -135,6 +140,14 @@ function showView() {
   document.getElementById('vPvz').textContent = d.pvz_address || '—';
 }
 
+function applyPvzRoleLock() {
+  const canEdit = profileData && profileData.can_edit_pvz_role !== false;
+  const block = document.getElementById('pvzRoleEditBlock');
+  const hint = document.getElementById('pvzRoleLockedHint');
+  if (block) block.style.display = canEdit ? '' : 'none';
+  if (hint) hint.classList.toggle('d-none', canEdit);
+}
+
 function showEdit() {
   document.getElementById('profileView').style.display = 'none';
   document.getElementById('profileEdit').style.display = 'block';
@@ -143,11 +156,14 @@ function showEdit() {
   document.getElementById('eLastName').value = d.last_name || '';
   document.getElementById('eEmail').value = d.email || '';
   document.getElementById('ePhone').value = d.phone_number || '';
-  document.getElementById('ePvz').value = d.pvz_address || '';
-  if (['staff_manager', 'intern', 'chief_manager'].includes(d.role)) {
-    document.getElementById('eRole').value = d.role;
-  } else {
-    document.getElementById('eRole').value = 'staff_manager';
+  applyPvzRoleLock();
+  if (d.can_edit_pvz_role !== false) {
+    document.getElementById('ePvz').value = d.pvz_address || '';
+    if (['staff_manager', 'intern', 'chief_manager'].includes(d.role)) {
+      document.getElementById('eRole').value = d.role;
+    } else {
+      document.getElementById('eRole').value = 'staff_manager';
+    }
   }
 }
 
@@ -194,10 +210,12 @@ document.addEventListener('DOMContentLoaded', function() {
       first_name: document.getElementById('eFirstName').value.trim(),
       last_name: document.getElementById('eLastName').value.trim(),
       email: document.getElementById('eEmail').value.trim(),
-      phone_number: document.getElementById('ePhone').value.trim(),
-      pvz_address: document.getElementById('ePvz').value.trim(),
-      role: document.getElementById('eRole').value
+      phone_number: document.getElementById('ePhone').value.trim()
     };
+    if (profileData && profileData.can_edit_pvz_role !== false) {
+      payload.pvz_address = document.getElementById('ePvz').value.trim();
+      payload.role = document.getElementById('eRole').value;
+    }
     try {
       const res = await fetch('/api/accounts/profile/', {
         method: 'PUT',

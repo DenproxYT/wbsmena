@@ -10,6 +10,7 @@ class ScheduleSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source='user.username', read_only=True)
     full_name = serializers.SerializerMethodField(read_only=True)
     user_id = serializers.IntegerField(source='user.id', read_only=True)
+    user_is_universal = serializers.SerializerMethodField(read_only=True)
     user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), required=False, allow_null=True, default=serializers.CurrentUserDefault())
     pvz_address = serializers.CharField(required=False, allow_blank=True)
 
@@ -18,11 +19,19 @@ class ScheduleSerializer(serializers.ModelSerializer):
             name = f"{obj.user.first_name or ''} {obj.user.last_name or ''}".strip()
             return name or obj.user.username
         return ''
+
+    def get_user_is_universal(self, obj):
+        if obj.user:
+            return bool(getattr(obj.user, 'is_universal', False))
+        return False
     
     class Meta:
         model = Schedule
-        fields = ["id", "user", "user_id", "username", "full_name", "date", "shifts", "comment", "pvz_address"]
-        read_only_fields = ("username", "full_name", "user_id")
+        fields = [
+            "id", "user", "user_id", "username", "full_name",
+            "user_is_universal", "date", "shifts", "comment", "pvz_address",
+        ]
+        read_only_fields = ("username", "full_name", "user_id", "user_is_universal")
 
 
 class HouseholdSupplyRequestSerializer(serializers.ModelSerializer):

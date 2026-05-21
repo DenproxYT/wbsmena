@@ -2,10 +2,10 @@
 
 {% block content %}
 <div class="row justify-content-center">
-  <div class="col-md-6">
+  <div class="col-md-7">
     <div class="card card-shadow p-4">
       <h3 class="mb-2">Первый вход</h3>
-      <p class="text-muted">Задайте логин, пароль и выберите ПВЗ, на котором вы работаете.</p>
+      <p class="text-muted">Задайте логин, пароль, роль и место работы. Эти данные можно будет изменить только через администратора.</p>
       <form id="firstLoginForm">
         <div class="mb-3">
           <label class="form-label">Текущий временный пароль</label>
@@ -24,8 +24,24 @@
           <input class="form-control" id="fConfirmPassword" type="password" minlength="6" required>
         </div>
         <div class="mb-3">
+          <label class="form-label">Роль</label>
+          <select class="form-select" id="fRole" required>
+            <option value="">Выберите роль</option>
+            <option value="intern">Стажёр</option>
+            <option value="staff_manager">Штатный менеджер</option>
+            <option value="chief_manager">Главный менеджер</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="fUniversal">
+            <label class="form-check-label" for="fUniversal">{{ universal_pvz_label }}</label>
+          </div>
+          <div class="form-text">Отметьте, если работаете на всех ПВЗ по вызову.</div>
+        </div>
+        <div class="mb-3" id="pvzWrap">
           <label class="form-label">ПВЗ (место работы)</label>
-          <select class="form-select" id="fPvz" required>
+          <select class="form-select" id="fPvz">
             <option value="">Выберите ПВЗ</option>
             {% for pvz in pvz_list %}
             <option value="{{ pvz }}">{{ pvz }}</option>
@@ -40,37 +56,62 @@
 </div>
 
 <script>
-document.getElementById('firstLoginForm').addEventListener('submit', async function(e) {
-  e.preventDefault();
-  const p1 = document.getElementById('fNewPassword').value;
-  const p2 = document.getElementById('fConfirmPassword').value;
-  if (p1 !== p2) {
-    document.getElementById('msg').innerHTML = '<div class="alert alert-danger">Пароли не совпадают.</div>';
-    return;
+(function() {
+  const universalLabel = "{{ universal_pvz_label|escapejs }}";
+  const chk = document.getElementById('fUniversal');
+  const pvzWrap = document.getElementById('pvzWrap');
+  const pvzSel = document.getElementById('fPvz');
+
+  function syncPvzRequired() {
+    const uni = chk.checked;
+    pvzWrap.style.display = uni ? 'none' : '';
+    pvzSel.required = !uni;
+    if (uni) pvzSel.value = '';
   }
-  const pvz = document.getElementById('fPvz').value;
-  if (!pvz) {
-    document.getElementById('msg').innerHTML = '<div class="alert alert-danger">Выберите ПВЗ из списка.</div>';
-    return;
-  }
-  const payload = {
-    current_password: document.getElementById('fCurrentPassword').value,
-    new_username: document.getElementById('fNewUsername').value.trim(),
-    new_password: p1,
-    pvz_address: pvz
-  };
-  const res = await fetch('/api/accounts/first-login/', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': window.getCSRF() },
-    body: JSON.stringify(payload)
+  chk.addEventListener('change', syncPvzRequired);
+  syncPvzRequired();
+
+  document.getElementById('firstLoginForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const p1 = document.getElementById('fNewPassword').value;
+    const p2 = document.getElementById('fConfirmPassword').value;
+    if (p1 !== p2) {
+      document.getElementById('msg').innerHTML = '<div class="alert alert-danger">Пароли не совпадают.</div>';
+      return;
+    }
+    const role = document.getElementById('fRole').value;
+    if (!role) {
+      document.getElementById('msg').innerHTML = '<div class="alert alert-danger">Выберите роль.</div>';
+      return;
+    }
+    const isUniversal = chk.checked;
+    const pvz = document.getElementById('fPvz').value;
+    if (!isUniversal && !pvz) {
+      document.getElementById('msg').innerHTML = '<div class="alert alert-danger">Выберите ПВЗ или отметьте «Универсал».</div>';
+      return;
+    }
+    const payload = {
+      current_password: document.getElementById('fCurrentPassword').value,
+      new_username: document.getElementById('fNewUsername').value.trim(),
+      new_password: p1,
+      role: role,
+      is_universal: isUniversal,
+      pvz_address: isUniversal ? universalLabel : pvz
+    };
+    const res = await fetch('/api/accounts/first-login/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': window.getCSRF() },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      document.getElementById('msg').innerHTML = '<div class="alert alert-success">Данные сохранены.</div>';
+      setTimeout(function() { location.href = '/'; }, 500);
+    } else {
+      const err = data.detail || (typeof data === 'object' ? Object.values(data).flat().join(' ') : JSON.stringify(data));
+      document.getElementById('msg').innerHTML = '<div class="alert alert-danger">' + err + '</div>';
+    }
   });
-  const data = await res.json().catch(() => ({}));
-  if (res.ok) {
-    document.getElementById('msg').innerHTML = '<div class="alert alert-success">Данные обновлены.</div>';
-    setTimeout(function() { location.href = '/'; }, 500);
-  } else {
-    document.getElementById('msg').innerHTML = '<div class="alert alert-danger">' + (data.detail || JSON.stringify(data)) + '</div>';
-  }
-});
+})();
 </script>
 {% endblock %}

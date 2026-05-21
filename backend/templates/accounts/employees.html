@@ -99,10 +99,17 @@
               <label class="form-label">Телефон</label>
               <input type="text" class="form-control" id="empPhone" name="phone_number" placeholder="+7...">
             </div>
-            <div class="col-md-6">
+            <div class="col-12">
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="empUniversal">
+                <label class="form-check-label" for="empUniversal">{{ universal_pvz_label }}</label>
+              </div>
+            </div>
+            <div class="col-md-6" id="empPvzWrap">
               <label class="form-label">ПВЗ (место работы)</label>
-              <select class="form-select" id="empPvz" name="pvz_address" required>
+              <select class="form-select" id="empPvz" name="pvz_address">
                 <option value="">Выберите ПВЗ</option>
+                <option value="{{ universal_pvz_label }}">{{ universal_pvz_label }}</option>
                 {% for pvz in pvz_list %}
                 <option value="{{ pvz }}">{{ pvz }}</option>
                 {% endfor %}
@@ -145,6 +152,24 @@ let employeesList = [];
 let editingEmployeeId = null;
 const currentUserId = {{ current_user_id|default:0 }};
 
+const UNIVERSAL_PVZ_LABEL = "{{ universal_pvz_label|escapejs }}";
+
+function syncEmpUniversal() {
+  const uni = document.getElementById('empUniversal').checked;
+  const wrap = document.getElementById('empPvzWrap');
+  const sel = document.getElementById('empPvz');
+  if (uni) {
+    wrap.style.display = 'none';
+    sel.required = false;
+    sel.value = UNIVERSAL_PVZ_LABEL;
+  } else {
+    wrap.style.display = '';
+    sel.required = true;
+  }
+}
+
+document.getElementById('empUniversal').addEventListener('change', syncEmpUniversal);
+
 document.addEventListener('DOMContentLoaded', function() {
   loadEmployees();
 });
@@ -185,7 +210,7 @@ function renderTable() {
       '<td><div class="fw-medium">' + (u.username || '—') + '</div><small class="text-muted">' + name + '</small></td>' +
       '<td><small>' + (u.email || '—') + '</small></td>' +
       '<td><small>' + (u.phone_number || '—') + '</small></td>' +
-      '<td><small class="text-muted">' + (u.pvz_address || '—') + '</small></td>' +
+      '<td><small class="text-muted">' + (u.pvz_address || '—') + (u.is_universal ? ' <span class="badge bg-warning text-dark">Универсал</span>' : '') + '</small></td>' +
       '<td><span class="badge bg-primary">' + (u.role_display || u.role || '—') + '</span></td>' +
       '<td>' + statusBadge + '</td>' +
       '<td><button class="btn btn-sm btn-outline-primary" onclick="openEditModal(' + u.id + ')" title="Редактировать"><i class="bi bi-pencil"></i></button>' + actionBtn + '</td>' +
@@ -203,6 +228,8 @@ function openCreateModal() {
   document.getElementById('empPasswordWrap').style.display = '';
   document.getElementById('quickRegMode').checked = false;
   document.getElementById('quickRegCount').value = 1;
+  document.getElementById('empUniversal').checked = false;
+  syncEmpUniversal();
   toggleQuickRegMode();
 }
 
@@ -223,8 +250,10 @@ async function openEditModal(id) {
     document.getElementById('empLastName').value = u.last_name || '';
     document.getElementById('empEmail').value = u.email || '';
     document.getElementById('empPhone').value = u.phone_number || '';
-    document.getElementById('empPvz').value = u.pvz_address || '';
+    document.getElementById('empUniversal').checked = !!u.is_universal;
+    document.getElementById('empPvz').value = u.is_universal ? UNIVERSAL_PVZ_LABEL : (u.pvz_address || '');
     document.getElementById('empRole').value = u.role || 'intern';
+    syncEmpUniversal();
     document.getElementById('quickRegMode').checked = false;
     toggleQuickRegMode();
     new bootstrap.Modal(document.getElementById('employeeModal')).show();
@@ -306,13 +335,15 @@ async function saveEmployee() {
     }
   }
 
+  const isUniversal = document.getElementById('empUniversal').checked;
   const payload = {
     username: document.getElementById('empUsername').value.trim(),
     first_name: document.getElementById('empFirstName').value.trim(),
     last_name: document.getElementById('empLastName').value.trim(),
     email: document.getElementById('empEmail').value.trim(),
     phone_number: document.getElementById('empPhone').value.trim(),
-    pvz_address: document.getElementById('empPvz').value || '',
+    is_universal: isUniversal,
+    pvz_address: isUniversal ? UNIVERSAL_PVZ_LABEL : (document.getElementById('empPvz').value || ''),
     role: document.getElementById('empRole').value || 'intern'
   };
   if (isCreate) {

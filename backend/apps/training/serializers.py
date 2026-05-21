@@ -31,6 +31,8 @@ class TrainingMaterialSerializer(serializers.ModelSerializer):
     test_access_message = serializers.SerializerMethodField()
     is_test_only = serializers.SerializerMethodField()
     is_completed = serializers.SerializerMethodField()
+    completed_slides = serializers.SerializerMethodField()
+    total_slides = serializers.SerializerMethodField()
     can_access_training_test = serializers.SerializerMethodField()
 
     class Meta:
@@ -46,6 +48,8 @@ class TrainingMaterialSerializer(serializers.ModelSerializer):
             "pdf_url",
             "progress_percent",
             "is_completed",
+            "completed_slides",
+            "total_slides",
             "attempts_used",
             "max_attempts",
             "has_test",
@@ -55,25 +59,30 @@ class TrainingMaterialSerializer(serializers.ModelSerializer):
             "can_access_training_test",
         )
 
-    def get_progress_percent(self, obj) -> int:
+    def _get_progress(self, obj):
         user = self.context.get("request").user if self.context.get("request") else None
         if not user or not user.is_authenticated:
-            return 0
+            return None
         try:
-            prog = TrainingProgress.objects.get(user=user, material=obj)
-            return prog.progress_percent
+            return TrainingProgress.objects.get(user=user, material=obj)
         except TrainingProgress.DoesNotExist:
-            return 0
+            return None
+
+    def get_progress_percent(self, obj) -> int:
+        prog = self._get_progress(obj)
+        return prog.progress_percent if prog else 0
 
     def get_is_completed(self, obj) -> bool:
-        user = self.context.get("request").user if self.context.get("request") else None
-        if not user or not user.is_authenticated:
-            return False
-        try:
-            prog = TrainingProgress.objects.get(user=user, material=obj)
-            return bool(prog.is_completed)
-        except TrainingProgress.DoesNotExist:
-            return False
+        prog = self._get_progress(obj)
+        return bool(prog.is_completed) if prog else False
+
+    def get_completed_slides(self, obj) -> int:
+        prog = self._get_progress(obj)
+        return prog.completed_slides if prog else 0
+
+    def get_total_slides(self, obj) -> int:
+        prog = self._get_progress(obj)
+        return prog.total_slides if prog else 0
 
     def get_can_access_training_test(self, obj) -> bool:
         """Одинаково для всех материалов в ответе: только роль «intern»."""

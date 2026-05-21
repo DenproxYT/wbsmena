@@ -78,15 +78,26 @@ class TrainingProgressView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         user = self.request.user
         material = serializer.validated_data["material"]
-        completed = serializer.validated_data.get("completed_slides", 0)
-        total = serializer.validated_data.get("total_slides", 0)
+        completed = serializer.validated_data.get("completed_slides", 0) or 0
+        total = serializer.validated_data.get("total_slides", 0) or 0
+        want_completed = bool(serializer.validated_data.get("is_completed", False))
+
+        existing = TrainingProgress.objects.filter(user=user, material=material).first()
+        if existing:
+            completed = max(existing.completed_slides, completed)
+            total = max(existing.total_slides, total) if total else existing.total_slides
+            if existing.is_completed:
+                want_completed = True
+            if total and completed >= total:
+                want_completed = True
+
         obj, _ = TrainingProgress.objects.update_or_create(
             user=user,
             material=material,
             defaults={
                 "completed_slides": completed,
                 "total_slides": total,
-                "is_completed": serializer.validated_data.get("is_completed", False),
+                "is_completed": want_completed,
             },
         )
         self._instance = obj

@@ -1,3 +1,4 @@
+{% load static %}
 <!doctype html>
 <html lang="ru" data-bs-theme="light">
   <head>
@@ -845,6 +846,28 @@
         background: #1e293b;
       }
 
+      /* Тестирование в обучении */
+      [data-bs-theme="dark"] .training-exam-root .exam-block-title,
+      [data-bs-theme="dark"] .training-exam-root .exam-q-card .card-body,
+      [data-bs-theme="dark"] .training-exam-root .exam-form-check .form-check-label {
+        color: var(--text-primary) !important;
+      }
+      [data-bs-theme="dark"] .training-exam-root .exam-form-check .exam-choice-radio,
+      [data-bs-theme="dark"] .training-exam-root .exam-form-check .exam-choice-check {
+        background-color: #0f172a;
+        border-color: #64748b;
+      }
+      [data-bs-theme="dark"] .training-exam-root .btn-check + label {
+        color: var(--text-primary);
+      }
+      [data-bs-theme="dark"] .training-exam-root .list-group-item {
+        background-color: #1e293b;
+        color: var(--text-primary);
+      }
+      [data-bs-theme="dark"] .exam-result-screen .card-body {
+        color: var(--text-primary);
+      }
+
       [data-bs-theme="dark"] .navbar-app .nav-divider,
       [data-bs-theme="dark"] .navbar-app .navbar-user-block {
         border-color: var(--border-color);
@@ -859,6 +882,9 @@
       <div style="margin-top:0.5rem;font-size:0.95rem;opacity:0.9;">Загрузка...</div>
     </div>
     <style>@keyframes appLoadSpin{to{transform:rotate(360deg);}}</style>
+    {% if request.user.is_authenticated %}
+    <audio id="notifSound" preload="auto" src="{% static 'notification.mp3' %}"></audio>
+    {% endif %}
     <div class="site-wrapper">
     <nav class="navbar navbar-expand-lg navbar-app">
       <div class="container">
@@ -1009,6 +1035,13 @@
 
       {% if request.user.is_authenticated %}
       ;(function loadNotifications() {
+        let lastNotifCount = null
+        function playNotifSound() {
+          const audio = document.getElementById('notifSound')
+          if (!audio) return
+          audio.currentTime = 0
+          audio.play().catch(function () {})
+        }
         async function refreshNotifBadge() {
           try {
             const res = await fetch('/api/core/notifications/unread-count/')
@@ -1017,6 +1050,8 @@
             const badge = document.getElementById('notifBadge')
             if (!badge) return
             const n = data.count || 0
+            if (lastNotifCount !== null && n > lastNotifCount) playNotifSound()
+            lastNotifCount = n
             badge.textContent = n > 99 ? '99+' : n
             badge.style.display = n > 0 ? 'inline-block' : 'none'
           } catch (e) {}

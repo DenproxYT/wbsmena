@@ -13,7 +13,7 @@ from decimal import Decimal, InvalidOperation
 import re
 from .models import Schedule, HouseholdSupplyRequest
 from .serializers import ScheduleSerializer, HouseholdSupplyRequestSerializer
-from .constants import PVZ_ADDRESSES
+from .constants import PVZ_ADDRESSES, UNIVERSAL_PVZ_LABEL
 from .period_utils import (
     check_schedule_write_allowed,
     get_visible_months_for_user,
@@ -30,6 +30,16 @@ def is_schedule_admin(user):
     if user.is_staff or user.is_superuser:
         return True
     return getattr(user, 'role', None) in ('administrator', 'owner')
+
+
+def resolve_schedule_pvz_for_user(target_user, requested_pvz=''):
+    """ПВЗ для записи графика: у универсалов — единая метка, иначе из запроса или профиля."""
+    if getattr(target_user, 'is_universal', False):
+        return UNIVERSAL_PVZ_LABEL
+    pvz = (requested_pvz or '').strip()
+    if pvz and pvz in PVZ_ADDRESSES:
+        return pvz
+    return (getattr(target_user, 'pvz_address', '') or '').strip() or (PVZ_ADDRESSES[0] if PVZ_ADDRESSES else '')
 
 
 def _normalize_person_text(value: str) -> str:
@@ -101,7 +111,7 @@ class ScheduleListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         user = self.request.user
-        queryset = Schedule.objects.all()
+        queryset = Schedule.objects.select_related('user')
         
         # Фильтрация по дате
         date_year = self.request.query_params.get('date__year', None)
@@ -137,22 +147,22 @@ class ScheduleListCreateView(generics.ListCreateAPIView):
         self._assert_can_write(serializer.validated_data['date'])
         user = self.request.user
         pvz = self.request.data.get('pvz_address', '').strip()
-        if pvz and pvz in PVZ_ADDRESSES:
-            pvz_address = pvz
-        else:
-            pvz_address = (getattr(user, 'pvz_address', '') or '').strip() or (PVZ_ADDRESSES[0] if PVZ_ADDRESSES else '')
         
         if not is_schedule_admin(user):
+            pvz_address = resolve_schedule_pvz_for_user(user, pvz)
             serializer.save(user=user, pvz_address=pvz_address)
         else:
             user_id = self.request.data.get('user')
             if user_id:
                 try:
                     target_user = User.objects.get(id=user_id)
+                    pvz_address = resolve_schedule_pvz_for_user(target_user, pvz)
                     serializer.save(user=target_user, pvz_address=pvz_address)
                 except User.DoesNotExist:
+                    pvz_address = resolve_schedule_pvz_for_user(user, pvz)
                     serializer.save(user=user, pvz_address=pvz_address)
             else:
+                pvz_address = resolve_schedule_pvz_for_user(user, pvz)
                 serializer.save(user=user, pvz_address=pvz_address)
 
 
@@ -175,17 +185,18 @@ class ScheduleRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
         self._assert_can_write(d)
         user = self.request.user
         pvz = self.request.data.get('pvz_address', '').strip()
-        if pvz and pvz in PVZ_ADDRESSES:
-            pvz_address = pvz
-        else:
-            pvz_address = getattr(serializer.instance.user, 'pvz_address', '') or (PVZ_ADDRESSES[0] if PVZ_ADDRESSES else '')
+        target = serializer.instance.user
         
         if not is_schedule_admin(user):
+            pvz_address = resolve_schedule_pvz_for_user(user, pvz)
             serializer.save(user=user, pvz_address=pvz_address)
         else:
             user_id = self.request.data.get('user')
             if user_id:
                 target_user = User.objects.get(id=user_id)
+                target = target_user
+            pvz_address = resolve_schedule_pvz_for_user(target, pvz)
+            if user_id:
                 serializer.save(user=target_user, pvz_address=pvz_address)
             else:
                 serializer.save(pvz_address=pvz_address)
@@ -197,7 +208,7 @@ class ScheduleExportView(generics.ListAPIView):
 
     def get_queryset(self):
         user = self.request.user
-        queryset = Schedule.objects.all()
+        queryset = Schedule.objects.select_related('user')
         
         # Фильтрация по дате
         date_year = self.request.query_params.get('date__year', None)
@@ -306,20 +317,76 @@ class ScheduleExportView(generics.ListAPIView):
             cell.alignment = center
             cell.fill = header_fill
 
-        # Группируем график: ПВЗ -> пользователь -> день -> смена.
+        # Группируем: обычные — по ПВЗ; универсалы — один раз в отдельном блоке.
         grouped = {}
+        grouped_universal = {}
         for s in queryset:
-            pvz = s.pvz_address or "Без ПВЗ"
             user_key = s.user_id
+            u = s.user
+            if getattr(u, "is_universal", False):
+                grouped_universal.setdefault(user_key, {"user": u, "days": {}})
+                grouped_universal[user_key]["days"][s.date.day] = float(s.shifts or 0)
+                continue
+            pvz = s.pvz_address or "Без ПВЗ"
             grouped.setdefault(pvz, {})
-            grouped[pvz].setdefault(user_key, {
-                "user": s.user,
-                "days": {},
-            })
+            grouped[pvz].setdefault(user_key, {"user": u, "days": {}})
             grouped[pvz][user_key]["days"][s.date.day] = float(s.shifts or 0)
 
         row_idx = 6
         last_col = summary2_start + 4
+
+        def write_user_row(ri, user_row, i_user):
+            u = user_row["user"]
+            full_name = f"{u.last_name or ''} {u.first_name or ''}".strip() or u.username
+            phone = (getattr(u, "phone_number", "") or "").strip()
+            if getattr(u, "is_universal", False):
+                label = f"{full_name} / {phone} [Универсал]"
+            else:
+                label = f"{full_name} / {phone}"
+            base_fill = alt_fill if (i_user % 2 == 1) else None
+            ws.cell(row=ri, column=1, value=label).alignment = left
+            for day in range(1, days_in_month + 1):
+                val = user_row["days"].get(day)
+                if val and val > 0:
+                    cell = ws.cell(row=ri, column=col_for_day(day), value=val)
+                    cell.alignment = center
+            for c in range(1, last_col + 1):
+                cell = ws.cell(row=ri, column=c)
+                if base_fill and not cell.fill.patternType:
+                    cell.fill = base_fill
+                cell.border = thin_border
+            total_1_15 = sum((user_row["days"].get(d, 0) or 0) for d in range(1, min(15, days_in_month) + 1))
+            total_16_end = sum((user_row["days"].get(d, 0) or 0) for d in range(16, days_in_month + 1))
+            total1_col = summary1_start + 0
+            ded1_col = summary1_start + 1
+            pay1_col = summary1_start + 2
+            out1_col = summary1_start + 3
+            ws.cell(row=ri, column=total1_col, value=(total_1_15 or "")).alignment = center
+            ws.cell(row=ri, column=ded1_col, value="").alignment = center
+            ws.cell(row=ri, column=pay1_col, value=1900).alignment = center
+            ws.cell(
+                row=ri, column=out1_col,
+                value=f"={get_column_letter(pay1_col)}{ri}*{get_column_letter(total1_col)}{ri}-{get_column_letter(ded1_col)}{ri}",
+            ).alignment = center
+            total2_col = summary2_start + 0
+            pct2_col = summary2_start + 1
+            pay2_col = summary2_start + 2
+            ded2_col = summary2_start + 3
+            out2_col = summary2_start + 4
+            ws.cell(row=ri, column=total2_col, value=(total_16_end or "")).alignment = center
+            ws.cell(row=ri, column=pct2_col, value="").alignment = center
+            ws.cell(row=ri, column=pay2_col, value=1900).alignment = center
+            ws.cell(row=ri, column=ded2_col, value="").alignment = center
+            ws.cell(
+                row=ri, column=out2_col,
+                value=(
+                    f"=({get_column_letter(pay2_col)}{ri}*{get_column_letter(total2_col)}{ri})"
+                    f"+({get_column_letter(pct2_col)}{ri}*({get_column_letter(total1_col)}{ri}+{get_column_letter(total2_col)}{ri}))"
+                    f"-{get_column_letter(ded2_col)}{ri}"
+                ),
+            ).alignment = center
+            return ri + 1
+
         for pvz, users_map in grouped.items():
             # Строка ПВЗ — заливка на всю ширину + толстая граница сверху
             ws.cell(row=row_idx, column=1, value=f"ЧИТА_ {pvz}").font = header_font
@@ -340,64 +407,31 @@ class ScheduleExportView(generics.ListAPIView):
                 ),
             )
             for i_user, user_row in enumerate(users_rows):
-                u = user_row["user"]
-                full_name = f"{u.last_name or ''} {u.first_name or ''}".strip() or u.username
-                phone = (getattr(u, "phone_number", "") or "").strip()
-                base_fill = alt_fill if (i_user % 2 == 1) else None
-                ws.cell(row=row_idx, column=1, value=f"{full_name} / {phone}").alignment = left
-                for day in range(1, days_in_month + 1):
-                    val = user_row["days"].get(day)
-                    if val and val > 0:
-                        cell = ws.cell(row=row_idx, column=col_for_day(day), value=val)
-                        cell.alignment = center
-                # Проставим заливку/границы по всей строке (включая пустые ячейки)
-                for c in range(1, last_col + 1):
-                    cell = ws.cell(row=row_idx, column=c)
-                    if base_fill and not cell.fill.patternType:
-                        cell.fill = base_fill
-                    cell.border = thin_border
+                row_idx = write_user_row(row_idx, user_row, i_user)
 
-                # Итоги и формулы как в вашем файле.
-                total_1_15 = sum((user_row["days"].get(d, 0) or 0) for d in range(1, min(15, days_in_month) + 1))
-                total_16_end = sum((user_row["days"].get(d, 0) or 0) for d in range(16, days_in_month + 1))
+            for c in range(1, last_col + 1):
+                cell = ws.cell(row=row_idx, column=c)
+                cell.border = Border(left=thin, right=thin, top=thin, bottom=thick)
+            row_idx += 2
 
-                # Блок 1: Общее 1-15 / Удержания / Выплата / К выдаче
-                total1_col = summary1_start + 0
-                ded1_col = summary1_start + 1
-                pay1_col = summary1_start + 2
-                out1_col = summary1_start + 3
-                ws.cell(row=row_idx, column=total1_col, value=(total_1_15 or "")).alignment = center
-                ws.cell(row=row_idx, column=ded1_col, value="").alignment = center  # Удержания (вручную)
-                ws.cell(row=row_idx, column=pay1_col, value=1900).alignment = center  # Выплата
-                ws.cell(
-                    row=row_idx,
-                    column=out1_col,
-                    value=f"={get_column_letter(pay1_col)}{row_idx}*{get_column_letter(total1_col)}{row_idx}-{get_column_letter(ded1_col)}{row_idx}",
-                ).alignment = center
-
-                # Блок 2: Общее 16-конец / Проценты / Выплата / Удержания / К выдаче
-                total2_col = summary2_start + 0
-                pct2_col = summary2_start + 1
-                pay2_col = summary2_start + 2
-                ded2_col = summary2_start + 3
-                out2_col = summary2_start + 4
-                ws.cell(row=row_idx, column=total2_col, value=(total_16_end or "")).alignment = center
-                ws.cell(row=row_idx, column=pct2_col, value="").alignment = center  # Проценты (вручную)
-                ws.cell(row=row_idx, column=pay2_col, value=1900).alignment = center  # Выплата
-                ws.cell(row=row_idx, column=ded2_col, value="").alignment = center  # Удержания (вручную)
-                # Формула: (Выплата*Общее 16-31)+(Проценты*(Общее 1-15+Общее 16-31))-Удержания
-                ws.cell(
-                    row=row_idx,
-                    column=out2_col,
-                    value=(
-                        f"=({get_column_letter(pay2_col)}{row_idx}*{get_column_letter(total2_col)}{row_idx})"
-                        f"+({get_column_letter(pct2_col)}{row_idx}*({get_column_letter(total1_col)}{row_idx}+{get_column_letter(total2_col)}{row_idx}))"
-                        f"-{get_column_letter(ded2_col)}{row_idx}"
-                    ),
-                ).alignment = center
-                row_idx += 1
-
-            # Пустая строка-разделитель между ПВЗ (не серая “простыня”)
+        if grouped_universal:
+            ws.cell(row=row_idx, column=1, value=f"УНИВЕРСАЛЫ — {UNIVERSAL_PVZ_LABEL}").font = header_font
+            for c in range(1, last_col + 1):
+                cell = ws.cell(row=row_idx, column=c)
+                cell.fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+                cell.alignment = left if c == 1 else center
+                cell.border = Border(left=thin, right=thin, top=thick, bottom=thin)
+            row_idx += 1
+            uni_rows = sorted(
+                grouped_universal.values(),
+                key=lambda v: (
+                    (v["user"].last_name or "").lower(),
+                    (v["user"].first_name or "").lower(),
+                    (v["user"].username or "").lower(),
+                ),
+            )
+            for i_user, user_row in enumerate(uni_rows):
+                row_idx = write_user_row(row_idx, user_row, i_user)
             for c in range(1, last_col + 1):
                 cell = ws.cell(row=row_idx, column=c)
                 cell.border = Border(left=thin, right=thin, top=thin, bottom=thick)
@@ -972,3 +1006,83 @@ class HouseholdSupplyRequestListCreateView(generics.ListCreateAPIView):
         if is_schedule_admin(user):
             return HouseholdSupplyRequest.objects.select_related('user').all()
         return HouseholdSupplyRequest.objects.filter(user=user)
+
+
+class HouseholdSupplyExportView(APIView):
+    """Выгрузка заявок на хоз.нужды в Excel с полями для отметки (галочки)."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        if not is_schedule_admin(request.user):
+            return Response({"detail": "Нет доступа"}, status=status.HTTP_403_FORBIDDEN)
+
+        qs = HouseholdSupplyRequest.objects.select_related("user").order_by("-created_at")
+        pvz_filter = request.query_params.get("pvz_address", "").strip()
+        if pvz_filter:
+            qs = qs.filter(pvz_address=pvz_filter)
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Хоз.нужды"
+
+        header_font = Font(bold=True)
+        center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        header_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+        check_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+        thin = Side(style="thin", color="C9C9C9")
+        border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+        headers = [
+            "№", "Дата", "Сотрудник", "ПВЗ",
+            "Позиция 1", "☐", "Позиция 2", "☐", "Позиция 3", "☐",
+            "Позиция 4", "☐", "Позиция 5", "☐", "Примечание",
+        ]
+        for col, title in enumerate(headers, start=1):
+            cell = ws.cell(row=1, column=col, value=title)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = center
+            cell.border = border
+
+        row = 2
+        for num, req in enumerate(qs, start=1):
+            u = req.user
+            name = f"{u.last_name or ''} {u.first_name or ''}".strip() or u.username
+            items = [req.item_1, req.item_2, req.item_3, req.item_4, req.item_5]
+            ws.cell(row=row, column=1, value=num).alignment = center
+            ws.cell(row=row, column=2, value=req.created_at.strftime("%d.%m.%Y %H:%M")).alignment = center
+            ws.cell(row=row, column=3, value=name).alignment = left
+            ws.cell(row=row, column=4, value=req.pvz_address).alignment = left
+            col = 5
+            for item in items:
+                ws.cell(row=row, column=col, value=item or "").alignment = left
+                check_cell = ws.cell(row=row, column=col + 1, value="")
+                check_cell.alignment = center
+                check_cell.fill = check_fill
+                check_cell.border = border
+                col += 2
+            ws.cell(row=row, column=15, value="").alignment = left
+            for c in range(1, 16):
+                ws.cell(row=row, column=c).border = border
+            row += 1
+
+        widths = [5, 16, 22, 28, 24, 5, 24, 5, 24, 5, 24, 5, 24, 5, 18]
+        for i, w in enumerate(widths, start=1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+
+        ws.row_dimensions[1].height = 28
+        for r in range(2, row):
+            ws.row_dimensions[r].height = 22
+
+        from io import BytesIO
+        buf = BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M")
+        response = HttpResponse(
+            buf.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = f'attachment; filename="hoz_nuzhdy_{stamp}.xlsx"'
+        return response

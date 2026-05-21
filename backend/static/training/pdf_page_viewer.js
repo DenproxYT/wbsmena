@@ -1,12 +1,12 @@
 /**
- * Постраничный просмотр PDF (PDF.js): canvas, вперёд/назад, полный экран.
- * Зависимости: pdfjs-dist подключается с CDN при первом вызове.
+ * Постраничный просмотр PDF (PDF.js) с кэшем документов.
  */
 (function (global) {
   "use strict";
 
   const PDFJS_VERSION = "3.11.174";
   const PDFJS_BASE = "https://cdn.jsdelivr.net/npm/pdfjs-dist@" + PDFJS_VERSION + "/build/";
+  const pdfDocCache = Object.create(null);
 
   function loadScript(src) {
     return new Promise(function (resolve, reject) {
@@ -46,19 +46,15 @@
     };
   }
 
-  /**
-   * @param {Object} options
-   * @param {string} options.pdfUrl
-   * @param {HTMLElement} options.canvas
-   * @param {HTMLElement} options.wrap - контейнер для подгонки масштаба
-   * @param {HTMLElement} options.loadingEl
-   * @param {HTMLElement} options.pageLabelEl
-   * @param {HTMLButtonElement} options.btnPrev
-   * @param {HTMLButtonElement} options.btnNext
-   * @param {HTMLButtonElement} [options.btnFs]
-   * @param {HTMLElement} [options.fsTarget] - элемент для requestFullscreen
-   * @param {function(number,number):void} [options.onPageChange] - (current, total)
-   */
+  function getCachedPdf(pdfUrl) {
+    if (!pdfDocCache[pdfUrl]) {
+      pdfDocCache[pdfUrl] = ensurePdfJs().then(function () {
+        return global.pdfjsLib.getDocument({ url: pdfUrl, withCredentials: false }).promise;
+      });
+    }
+    return pdfDocCache[pdfUrl];
+  }
+
   function PdfPageViewer(options) {
     this.pdfUrl = options.pdfUrl;
     this.canvas = options.canvas;
@@ -70,12 +66,15 @@
     this.btnFs = options.btnFs || null;
     this.fsTarget = options.fsTarget || null;
     this.onPageChange = options.onPageChange || function () {};
+    this.initialPage = Math.max(1, parseInt(options.initialPage, 10) || 1);
+    this.onReady = options.onReady || function () {};
 
     this.pdf = null;
     this.pageNum = 1;
     this.numPages = 0;
     this.rendering = false;
     this._resizeBound = null;
+    this._fsBound = null;
     this._onPrev = null;
     this._onNext = null;
     this._onFs = null;
@@ -85,6 +84,10 @@
     if (this._resizeBound) {
       window.removeEventListener("resize", this._resizeBound);
       this._resizeBound = null;
+    }
+    if (this._fsBound && this.fsTarget) {
+      this.fsTarget.removeEventListener("fullscreenchange", this._fsBound);
+      this._fsBound = null;
     }
     if (this.btnPrev && this._onPrev) {
       this.btnPrev.removeEventListener("click", this._onPrev);
@@ -123,22 +126,17 @@
         var canvas = self.canvas;
         var ctx = canvas.getContext("2d");
         var wrap = self.wrap;
-        var w = wrap.clientWidth || 800;
-        var h = wrap.clientHeight || 600;
+        var w = wrap.clientWidth || 900;
+        var h = wrap.clientHeight || 640;
         var base = page.getViewport({ scale: 1 });
-        var scale = Math.min(w / base.width, h / base.height) * 0.96;
+        var scale = Math.min(w / base.width, h / base.height) * 0.98;
         var viewport = page.getViewport({ scale: scale });
         canvas.width = viewport.width;
         canvas.height = viewport.height;
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.fillStyle = "#ffffff";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        return page
-          .render({
-            canvasContext: ctx,
-            viewport: viewport,
-          })
-          .promise;
+        return page.render({ canvasContext: ctx, viewport: viewport }).promise;
       })
       .then(function () {
         self.rendering = false;
@@ -183,41 +181,33 @@
       this.loadingEl.textContent = "Загрузка PDF…";
       this.loadingEl.classList.remove("d-none");
     }
-    return ensurePdfJs()
-      .then(function () {
-        return global.pdfjsLib.getDocument({ url: self.pdfUrl, withCredentials: false }).promise;
-      })
+    return getCachedPdf(this.pdfUrl)
       .then(function (pdf) {
         self.pdf = pdf;
         self.numPages = pdf.numPages;
-        self.pageNum = 1;
+        self.pageNum = Math.min(self.initialPage, self.numPages);
         if (self.loadingEl) {
           self.loadingEl.classList.add("d-none");
         }
         self._updateChrome();
-        self._onPrev = function () {
-          self.goPrev();
-        };
-        self._onNext = function () {
-          self.goNext();
-        };
-        self._onFs = function () {
-          self.toggleFullscreen();
-        };
-        if (self.btnPrev) {
-          self.btnPrev.addEventListener("click", self._onPrev);
-        }
-        if (self.btnNext) {
-          self.btnNext.addEventListener("click", self._onNext);
-        }
-        if (self.btnFs) {
-          self.btnFs.addEventListener("click", self._onFs);
-        }
-        self._renderPage();
+        self._onPrev = function () { self.goPrev(); };
+        self._onNext = function () { self.goNext(); };
+        self._onFs = function () { self.toggleFullscreen(); };
+        if (self.btnPrev) self.btnPrev.addEventListener("click", self._onPrev);
+        if (self.btnNext) self.btnNext.addEventListener("click", self._onNext);
+        if (self.btnFs) self.btnFs.addEventListener("click", self._onFs);
         self._resizeBound = debounce(function () {
           self._renderPage();
         }, 150);
         window.addEventListener("resize", self._resizeBound);
+        if (self.fsTarget) {
+          self._fsBound = debounce(function () {
+            self._renderPage();
+          }, 200);
+          self.fsTarget.addEventListener("fullscreenchange", self._fsBound);
+        }
+        self._renderPage();
+        self.onReady(self.numPages);
       })
       .catch(function (err) {
         console.error(err);
@@ -227,8 +217,10 @@
             (err && err.message ? err.message : "");
           self.loadingEl.classList.remove("d-none");
         }
+        self.onReady(0);
       });
   };
 
   global.TrainingPdfPageViewer = PdfPageViewer;
+  global.TrainingPdfDocCache = pdfDocCache;
 })(typeof window !== "undefined" ? window : this);

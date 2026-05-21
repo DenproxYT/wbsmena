@@ -57,6 +57,22 @@
     word-break: break-word;
     cursor: pointer;
   }
+  .training-pdf-viewer-wrap {
+    min-height: calc(100vh - 260px);
+  }
+  .training-pdf-canvas-wrap {
+    min-height: calc(100vh - 340px);
+  }
+  [data-bs-theme="dark"] .training-exam-root .exam-block-title,
+  [data-bs-theme="dark"] .training-exam-root .exam-q-card .card-body,
+  [data-bs-theme="dark"] .training-exam-root .exam-form-check .form-check-label {
+    color: var(--text-primary) !important;
+  }
+  [data-bs-theme="dark"] .training-exam-root .exam-form-check .exam-choice-radio,
+  [data-bs-theme="dark"] .training-exam-root .exam-form-check .exam-choice-check {
+    background-color: #0f172a;
+    border-color: #64748b;
+  }
 </style>
 <div class="row">
   <div class="col-md-10 offset-md-1">
@@ -126,6 +142,7 @@
   let currentMaterialId = null;
   let currentSlideIndex = 0;
   let pdfViewerInstance = null;
+  let progressSaveTimer = null;
 
   function destroyPdfViewer() {
     if (pdfViewerInstance) {
@@ -155,7 +172,7 @@
         if (id && !this.disabled) openTest(parseInt(id, 10));
       });
     }
-    loadTrainingMaterials(true);
+    loadTrainingMaterials(false);
   });
 
   function getLearningMaterials() {
@@ -356,10 +373,30 @@
     return '';
   }
 
+  function pdfInitialPage(material) {
+    if (material.is_completed && material.total_slides) return material.total_slides;
+    const cs = material.completed_slides || 0;
+    return cs > 0 ? cs : 1;
+  }
+
+  function updatePdfProgressUi(cur, tot, material) {
+    const bar = document.getElementById('pdfReadingBar');
+    if (bar && tot > 0) {
+      const pct = material && material.is_completed ? 100 : Math.round((cur / tot) * 100);
+      bar.style.width = pct + '%';
+    }
+    const hint = document.getElementById('pdfProgressHint');
+    if (hint && material && material.is_completed) {
+      hint.textContent = 'Материал пройден.';
+    }
+  }
+
   function renderPdfLessonViewer(material, pdfUrl) {
     const container = document.getElementById('viewerContainer');
     const safeTitle = escHtml(material.title);
     const safeModule = escHtml(material.module_title || '');
+    const initPage = pdfInitialPage(material);
+    const initPct = material.is_completed ? 100 : (material.total_slides ? Math.round((initPage / material.total_slides) * 100) : 0);
     container.innerHTML = `
       <div class="d-flex flex-column h-100">
         <div class="mb-2">
@@ -378,14 +415,14 @@
             </div>
           </div>
           <div class="progress mt-2" style="height: 6px;">
-            <div id="pdfReadingBar" class="progress-bar bg-success" role="progressbar" style="width: 0%;"></div>
+            <div id="pdfReadingBar" class="progress-bar bg-success" role="progressbar" style="width: ${initPct}%;"></div>
           </div>
           <div class="small text-muted mt-1" id="pdfProgressHint">
-            Листайте страницы кнопками внизу. Затем нажмите «Завершить», чтобы отметить материал пройденным.
+            ${material.is_completed ? 'Материал пройден.' : 'Листайте страницы. После загрузки PDF можно нажать «Завершить» или скачать файл.'}
           </div>
         </div>
 
-        <div id="pdfFsTarget" class="d-flex flex-column flex-grow-1 rounded-4 border shadow-sm bg-body overflow-hidden" style="min-height: calc(100vh - 340px);">
+        <div id="pdfFsTarget" class="d-flex flex-column flex-grow-1 rounded-4 border shadow-sm bg-body overflow-hidden training-pdf-viewer-wrap">
           <div class="d-flex justify-content-end align-items-center gap-2 px-2 py-1 border-bottom bg-light">
             <button type="button" class="btn btn-sm btn-outline-secondary border-0" id="pdfBtnPrint" title="Печать">
               <i class="bi bi-printer"></i>
@@ -394,7 +431,7 @@
               <i class="bi bi-arrows-fullscreen"></i>
             </button>
           </div>
-          <div id="pdfCanvasWrap" class="flex-grow-1 position-relative d-flex align-items-center justify-content-center training-pdf-backdrop" style="min-height: calc(100vh - 420px);">
+          <div id="pdfCanvasWrap" class="flex-grow-1 position-relative d-flex align-items-center justify-content-center training-pdf-backdrop training-pdf-canvas-wrap">
             <canvas id="trainingPdfCanvas" class="bg-white shadow"></canvas>
             <div id="pdfLoading" class="position-absolute small text-muted">Загрузка PDF…</div>
           </div>
@@ -411,7 +448,7 @@
 
         <div class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
           <div class="text-muted small"></div>
-          <button type="button" class="btn btn-success" onclick="finishPdfLesson(${material.id})">
+          <button type="button" class="btn btn-success" id="pdfBtnComplete" disabled>
             <i class="bi bi-check2-circle"></i> Завершить
           </button>
         </div>
@@ -426,6 +463,13 @@
       const w = window.open(pdfUrl, '_blank', 'noopener,noreferrer');
       if (w) w.onload = function () { try { w.print(); } catch (e) {} };
     });
+    document.getElementById('pdfDownloadLink').addEventListener('click', function () {
+      const tot = pdfViewerInstance && pdfViewerInstance.numPages ? pdfViewerInstance.numPages : (material.total_slides || 1);
+      saveProgress(material.id, tot, tot, true);
+    });
+    document.getElementById('pdfBtnComplete').addEventListener('click', function () {
+      finishPdfLesson(material.id);
+    });
 
     pdfViewerInstance = new TrainingPdfPageViewer({
       pdfUrl: pdfUrl,
@@ -437,30 +481,42 @@
       btnNext: document.getElementById('pdfBtnNext'),
       btnFs: document.getElementById('pdfBtnFullscreen'),
       fsTarget: document.getElementById('pdfFsTarget'),
+      initialPage: initPage,
       onPageChange: function (cur, tot) {
-        const bar = document.getElementById('pdfReadingBar');
-        if (bar && tot > 0) {
-          bar.style.width = Math.round((cur / tot) * 100) + '%';
+        updatePdfProgressUi(cur, tot, material);
+        queueSaveProgress(material.id, cur, tot, false);
+      },
+      onReady: function (tot) {
+        const btn = document.getElementById('pdfBtnComplete');
+        if (btn) btn.disabled = !tot;
+        if (tot && !material.total_slides) material.total_slides = tot;
+        if (tot) {
+          updatePdfProgressUi(pdfViewerInstance ? pdfViewerInstance.pageNum : initPage, tot, material);
+          if (!material.is_completed) {
+            queueSaveProgress(material.id, pdfViewerInstance.pageNum, tot, false);
+          }
         }
-        saveProgress(material.id, cur, tot, false);
       },
     });
     pdfViewerInstance.init();
   }
 
   function finishPdfLesson(materialId) {
-    const bar = document.getElementById('pdfReadingBar');
-    const hint = document.getElementById('pdfProgressHint');
+    const btn = document.getElementById('pdfBtnComplete');
+    if (btn && btn.disabled) return;
+    const material = trainingMaterials.find(m => m.id === materialId);
     let total = 1;
     if (pdfViewerInstance && pdfViewerInstance.numPages) {
       total = pdfViewerInstance.numPages;
+    } else if (material && material.total_slides) {
+      total = material.total_slides;
     }
-    if (bar) bar.style.width = '100%';
+    updatePdfProgressUi(total, total, material || {});
+    const hint = document.getElementById('pdfProgressHint');
     if (hint) hint.textContent = 'Материал отмечен как пройденный.';
     saveProgress(materialId, total, total, true);
     const footer = document.getElementById('lessonFooter');
     if (footer) {
-      const material = trainingMaterials.find(m => m.id === materialId);
       footer.innerHTML = 'Материал пройден. Выберите следующий слева.';
     }
   }
@@ -546,13 +602,26 @@
       footer.textContent = 'Нажмите «Далее», чтобы перейти к следующему шагу.';
     }
 
-    // Отправляем прогресс на сервер
-    saveProgress(material.id, index, total, index === total);
+    const markDone = index === total;
+    queueSaveProgress(material.id, index, total, markDone);
+  }
+
+  function queueSaveProgress(materialId, completedSlides, totalSlides, isCompleted) {
+    clearTimeout(progressSaveTimer);
+    progressSaveTimer = setTimeout(function () {
+      saveProgress(materialId, completedSlides, totalSlides, isCompleted);
+    }, 450);
   }
 
   async function saveProgress(materialId, completedSlides, totalSlides, isCompleted) {
+    const material = trainingMaterials.find(m => m.id === materialId);
+    let markComplete = !!isCompleted;
+    if (material && material.is_completed) markComplete = true;
+    if (!markComplete && totalSlides > 0 && completedSlides >= totalSlides) {
+      markComplete = true;
+    }
     try {
-      await fetch('/api/training/progress/', {
+      const res = await fetch('/api/training/progress/', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -562,15 +631,16 @@
           material: materialId,
           completed_slides: completedSlides,
           total_slides: totalSlides,
-          is_completed: isCompleted
+          is_completed: markComplete
         })
       });
-      // Обновляем прогресс в локальном списке
-      const material = trainingMaterials.find(m => m.id === materialId);
+      if (!res.ok) return;
       if (material) {
         const percent = totalSlides > 0 ? Math.round((completedSlides / totalSlides) * 100) : 0;
-        material.progress_percent = isCompleted ? 100 : percent;
-        if (isCompleted) material.is_completed = true;
+        material.progress_percent = markComplete ? 100 : percent;
+        material.completed_slides = completedSlides;
+        material.total_slides = totalSlides || material.total_slides;
+        if (markComplete) material.is_completed = true;
         renderMaterialsList();
         updateOverallProgress();
         updateFinalExamButton();

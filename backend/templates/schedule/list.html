@@ -364,6 +364,7 @@
 let scheduleMonths = [];
 let isScheduleAdminUser = {{ is_schedule_admin|yesno:"true,false" }};
 let currentMonthOpen = true;
+const UNIVERSAL_PVZ_LABEL = "{{ universal_pvz_label|escapejs }}";
 let currentSchedule = [];
 let editingId = null;
 
@@ -418,7 +419,9 @@ function onScheduleUserChange() {
   const uid = parseInt(su.value, 10);
   if (!uid) return;
   const u = window.usersWithPvz.find(x => x.id === uid);
-  if (u && u.pvz_address) {
+  if (u && u.is_universal) {
+    pvzEl.value = UNIVERSAL_PVZ_LABEL;
+  } else if (u && u.pvz_address) {
     pvzEl.value = u.pvz_address;
   }
 }
@@ -436,7 +439,8 @@ async function loadUsers() {
         users.forEach(user => {
           const option1 = document.createElement('option');
           option1.value = user.id;
-          option1.textContent = [user.first_name, user.last_name].filter(Boolean).join(' ') || user.username;
+          const label1 = ([user.first_name, user.last_name].filter(Boolean).join(' ') || user.username) + (user.is_universal ? ' [Универсал]' : '');
+          option1.textContent = label1;
           userSelect.appendChild(option1);
         });
       }
@@ -445,7 +449,8 @@ async function loadUsers() {
         users.forEach(user => {
           const option2 = document.createElement('option');
           option2.value = user.id;
-          option2.textContent = [user.first_name, user.last_name].filter(Boolean).join(' ') || user.username;
+          const label2 = ([user.first_name, user.last_name].filter(Boolean).join(' ') || user.username) + (user.is_universal ? ' [Универсал]' : '');
+          option2.textContent = label2;
           scheduleUserSelect.appendChild(option2);
         });
         scheduleUserSelect.addEventListener('change', onScheduleUserChange);
@@ -562,7 +567,9 @@ function renderCalendar() {
   const daysInMonth = lastDay.getDate();
   const startDay = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1;
   const allMode = isAllMode();
-  const pvzs = allMode ? [...new Set(currentSchedule.map(s => s.pvz_address).filter(Boolean))].sort() : null;
+  const regularData = currentSchedule.filter(s => !s.user_is_universal);
+  const universalData = currentSchedule.filter(s => s.user_is_universal);
+  const pvzs = allMode ? [...new Set(regularData.map(s => s.pvz_address).filter(Boolean))].sort() : null;
 
   function buildCalendarGrid(data, pvzAddr) {
     let h = `
@@ -624,7 +631,7 @@ function renderCalendar() {
   let html = '';
   if (allMode && pvzs && pvzs.length > 0) {
     pvzs.forEach(pvz => {
-      const data = currentSchedule.filter(s => s.pvz_address === pvz);
+      const data = regularData.filter(s => s.pvz_address === pvz);
       if (data.length === 0) return;
       const short = (pvz || '').replace(/^ЧИТА[_\\s]*/gi, '').trim();
       html += `
@@ -635,9 +642,19 @@ function renderCalendar() {
         </div>
       `;
     });
-  } else if (allMode && (!pvzs || pvzs.length === 0)) {
+  }
+  if (allMode && universalData.length > 0) {
+    html += `
+      <div class="pvz-block mb-4 pb-4 border-bottom">
+        <h5 class="mb-3"><i class="bi bi-people text-warning"></i> Универсалы — ${UNIVERSAL_PVZ_LABEL}</h5>
+        ${buildPvzSummary(universalData, daysInMonth)}
+        <div class="pvz-calendar">${buildCalendarGrid(universalData, UNIVERSAL_PVZ_LABEL)}</div>
+      </div>
+    `;
+  }
+  if (allMode && (!pvzs || pvzs.length === 0) && universalData.length === 0) {
     html = '<div class="text-center text-muted py-4">Нет смен за выбранный месяц</div>';
-  } else {
+  } else if (!allMode) {
     html = buildCalendarGrid(currentSchedule, null);
   }
 
@@ -705,7 +722,7 @@ function renderTable() {
           <div class="bg-primary bg-opacity-10 rounded-circle p-2 me-2">
             <i class="bi bi-person-fill text-primary"></i>
           </div>
-          <span class="fw-medium">${item.full_name || item.username || item.user || '—'}</span>
+          <span class="fw-medium">${item.full_name || item.username || item.user || '—'}${item.user_is_universal ? ' <span class="badge bg-warning text-dark">Универсал</span>' : ''}</span>
         </div>
       </td>
       <td>

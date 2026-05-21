@@ -98,8 +98,11 @@ class FirstLoginPageView(View):
     def get(self, request):
         if not request.user.is_authenticated:
             return redirect('/accounts/login/?next=/accounts/first-login/')
-        from apps.schedule.constants import PVZ_ADDRESSES
-        return render(request, 'accounts/first_login.html', {'pvz_list': PVZ_ADDRESSES})
+        from apps.schedule.constants import PVZ_ADDRESSES, UNIVERSAL_PVZ_LABEL
+        return render(request, 'accounts/first_login.html', {
+            'pvz_list': PVZ_ADDRESSES,
+            'universal_pvz_label': UNIVERSAL_PVZ_LABEL,
+        })
 
 
 class EmployeesPageView(View):
@@ -109,9 +112,10 @@ class EmployeesPageView(View):
             return redirect('/accounts/login/?next=/accounts/employees/')
         if not is_accounts_admin(request.user):
             return redirect('/')
-        from apps.schedule.constants import PVZ_ADDRESSES
+        from apps.schedule.constants import PVZ_ADDRESSES, UNIVERSAL_PVZ_LABEL
         return render(request, 'accounts/employees.html', {
             'pvz_list': PVZ_ADDRESSES,
+            'universal_pvz_label': UNIVERSAL_PVZ_LABEL,
             'current_user_id': request.user.id,
         })
 
@@ -257,10 +261,11 @@ class FirstLoginCredentialsView(APIView):
 
         request.user.username = serializer.validated_data["new_username"]
         request.user.set_password(serializer.validated_data["new_password"])
-        pvz = (serializer.validated_data.get("pvz_address") or "").strip()
-        if pvz:
-            request.user.pvz_address = pvz
+        request.user.pvz_address = (serializer.validated_data.get("pvz_address") or "").strip()
+        request.user.role = serializer.validated_data.get("role") or request.user.role
+        request.user.is_universal = bool(serializer.validated_data.get("is_universal"))
         request.user.must_change_credentials = False
+        request.user.profile_setup_done = True
         request.user.save()
         auth_login(request, request.user)
         return Response(UserSerializer(request.user).data)

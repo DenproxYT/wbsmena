@@ -2,7 +2,7 @@ from django.views import View
 from django.shortcuts import render, redirect
 
 from apps.accounts.views import is_accounts_admin
-from .constants import PVZ_ADDRESSES
+from .constants import PVZ_ADDRESSES, UNIVERSAL_PVZ_LABEL
 from .household_constants import HOUSEHOLD_SUPPLY_ITEMS
 from .views import is_schedule_admin
 
@@ -15,6 +15,7 @@ class SchedulePageView(View):
         items = [i for i in HOUSEHOLD_SUPPLY_ITEMS if i]
         return render(request, 'schedule/list.html', {
             'pvz_list': PVZ_ADDRESSES,
+            'universal_pvz_label': UNIVERSAL_PVZ_LABEL,
             'household_items': items,
             'is_schedule_admin': is_schedule_admin(user) if user.is_authenticated else False,
             'user_pvz_address': getattr(user, 'pvz_address', '') or '',

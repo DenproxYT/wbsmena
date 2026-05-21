@@ -17,6 +17,14 @@ class User(AbstractUser):
         'Требуется смена пароля при входе',
         default=False,
     )
+    is_universal = models.BooleanField(
+        'Универсал (работает на всех ПВЗ)',
+        default=False,
+    )
+    profile_setup_done = models.BooleanField(
+        'ПВЗ и роль заданы при первом входе',
+        default=False,
+    )
 
     class Meta:
         verbose_name = 'пользователь'
