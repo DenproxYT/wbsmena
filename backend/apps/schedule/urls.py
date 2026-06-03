@@ -4,6 +4,7 @@ from . import views
 urlpatterns = [
     path('', views.ScheduleListCreateView.as_view(), name='schedule-list-create'),
     path('months/', views.ScheduleMonthsView.as_view(), name='schedule-months'),
+    path('meta/', views.ScheduleRealtimeMetaView.as_view(), name='schedule-realtime-meta'),
     path('periods/<int:year>/<int:month>/toggle/', views.SchedulePeriodToggleView.as_view()),
     path('household/', views.HouseholdSupplyRequestListCreateView.as_view()),
     path('household/export/', views.HouseholdSupplyExportView.as_view()),

@@ -380,6 +380,7 @@ document.addEventListener('DOMContentLoaded', function() {
     loadUsers();
     {% endif %}
     loadSchedule();
+    startScheduleRealtime();
   });
   
   // Очистка формы импорта при открытии модального окна
@@ -1186,6 +1187,65 @@ async function importFromExcel() {
       ${e.message}
     </div>`;
   }
+}
+
+let scheduleRealtimeLastVersion = null;
+let scheduleRealtimeInFlight = false;
+function startScheduleRealtime() {
+  if (window.__scheduleRealtimeStarted) return;
+  window.__scheduleRealtimeStarted = true;
+
+  async function checkOnce() {
+    if (scheduleRealtimeInFlight) return;
+    const month = document.getElementById('monthFilter')?.value;
+    if (!month) return;
+
+    const [year, monthNum] = month.split('-');
+    const params = new URLSearchParams();
+    params.append('date__year', year);
+    params.append('date__month', monthNum);
+
+    {% if is_schedule_admin %}
+    const userFilterEl = document.getElementById('userFilter');
+    if (userFilterEl && userFilterEl.value) params.append('user', userFilterEl.value);
+    const pvzFilterEl = document.getElementById('pvzFilter');
+    if (pvzFilterEl && pvzFilterEl.value) params.append('pvz_address', pvzFilterEl.value);
+    {% endif %}
+
+    scheduleRealtimeInFlight = true;
+    try {
+      const res = await fetch('/api/schedule/meta/?' + params.toString(), {
+        headers: { 'X-CSRFToken': window.getCSRF() }
+      });
+      if (!res.ok) return;
+      const meta = await res.json();
+      if (scheduleRealtimeLastVersion === null) {
+        scheduleRealtimeLastVersion = meta.latest_version;
+        return;
+      }
+      if (meta.latest_version !== scheduleRealtimeLastVersion) {
+        scheduleRealtimeLastVersion = meta.latest_version;
+        if (meta && typeof meta.is_open !== 'undefined' && scheduleMonths && scheduleMonths.length) {
+          const currentVal = document.getElementById('monthFilter')?.value;
+          const m = scheduleMonths.find(x => x.value === currentVal);
+          if (m) m.is_open = !!meta.is_open;
+        }
+        updatePeriodUI();
+        loadSchedule();
+      }
+    } catch (e) {
+    } finally {
+      scheduleRealtimeInFlight = false;
+    }
+  }
+
+  document.addEventListener('visibilitychange', function() {
+    if (!document.hidden) checkOnce();
+  });
+
+  setInterval(function() {
+    if (!document.hidden) checkOnce();
+  }, 2000);
 }
 
 // Показать уведомление
