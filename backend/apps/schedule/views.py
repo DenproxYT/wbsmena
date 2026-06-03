@@ -391,7 +391,10 @@ class ScheduleExportView(generics.ListAPIView):
                 return None
             return (getattr(user, "pvz_address", "") or "").strip() or "Без ПВЗ"
 
-        # Обычные сотрудники — один раз по «домашнему» ПВЗ (все смены суммируются, подмены в примечании).
+        def short_pvz_label(pvz: str) -> str:
+            return re.sub(r"^ЧИТА[_\s]*", "", (pvz or "").strip(), flags=re.I).strip() or pvz
+
+        # Штатные: смены на «своём» ПВЗ и отдельно по каждой подмене.
         grouped = {}
         grouped_universal = {}
         staff_by_user = {}
@@ -403,15 +406,18 @@ class ScheduleExportView(generics.ListAPIView):
                 grouped_universal[user_key]["days"][s.date.day] = float(s.shifts or 0)
                 continue
             home_pvz = employee_home_pvz(u)
-            sched_pvz = (s.pvz_address or "").strip()
+            sched_pvz = (s.pvz_address or "").strip() or home_pvz
             row = staff_by_user.setdefault(
                 user_key,
-                {"user": u, "days": {}, "substitute_pvzs": set()},
+                {"user": u, "home_days": {}, "subs": {}},
             )
             day = s.date.day
-            row["days"][day] = row["days"].get(day, 0) + float(s.shifts or 0)
-            if sched_pvz and sched_pvz != home_pvz:
-                row["substitute_pvzs"].add(sched_pvz)
+            shifts = float(s.shifts or 0)
+            if sched_pvz == home_pvz:
+                row["home_days"][day] = row["home_days"].get(day, 0) + shifts
+            else:
+                sub = row["subs"].setdefault(sched_pvz, {})
+                sub[day] = sub.get(day, 0) + shifts
 
         for user_key, user_row in staff_by_user.items():
             home_pvz = employee_home_pvz(user_row["user"])
@@ -419,25 +425,24 @@ class ScheduleExportView(generics.ListAPIView):
 
         row_idx = 6
         last_col = summary2_start + 4
+        total_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+        total_font = Font(bold=True)
 
-        def write_user_row(ri, user_row, i_user):
-            u = user_row["user"]
-            full_name = f"{u.last_name or ''} {u.first_name or ''}".strip() or u.username
-            phone = (getattr(u, "phone_number", "") or "").strip()
-            if getattr(u, "is_universal", False):
-                label = f"{full_name} / {phone} [Универсал]"
-            else:
-                label = f"{full_name} / {phone}"
-                subs = user_row.get("substitute_pvzs") or set()
-                if subs:
-                    short_parts = []
-                    for p in sorted(subs):
-                        short_parts.append(re.sub(r"^ЧИТА[_\s]*", "", p or "", flags=re.I).strip() or p)
-                    label += f" [подмена: {', '.join(short_parts)}]"
-            base_fill = alt_fill if (i_user % 2 == 1) else None
+        total1_col = summary1_start + 0
+        ded1_col = summary1_start + 1
+        pay1_col = summary1_start + 2
+        out1_col = summary1_start + 3
+        total2_col = summary2_start + 0
+        pct2_col = summary2_start + 1
+        pay2_col = summary2_start + 2
+        ded2_col = summary2_start + 3
+        out2_col = summary2_start + 4
+
+        def write_days_row(ri, label, days_dict, base_fill=None):
+            """Строка смен с формулами выплаты; возвращает номер строки."""
             ws.cell(row=ri, column=1, value=label).alignment = left
             for day in range(1, days_in_month + 1):
-                val = user_row["days"].get(day)
+                val = days_dict.get(day)
                 if val and val > 0:
                     cell = ws.cell(row=ri, column=col_for_day(day), value=val)
                     cell.alignment = center
@@ -446,12 +451,8 @@ class ScheduleExportView(generics.ListAPIView):
                 if base_fill and not cell.fill.patternType:
                     cell.fill = base_fill
                 cell.border = thin_border
-            total_1_15 = sum((user_row["days"].get(d, 0) or 0) for d in range(1, min(15, days_in_month) + 1))
-            total_16_end = sum((user_row["days"].get(d, 0) or 0) for d in range(16, days_in_month + 1))
-            total1_col = summary1_start + 0
-            ded1_col = summary1_start + 1
-            pay1_col = summary1_start + 2
-            out1_col = summary1_start + 3
+            total_1_15 = sum((days_dict.get(d, 0) or 0) for d in range(1, min(15, days_in_month) + 1))
+            total_16_end = sum((days_dict.get(d, 0) or 0) for d in range(16, days_in_month + 1))
             ws.cell(row=ri, column=total1_col, value=(total_1_15 or "")).alignment = center
             ws.cell(row=ri, column=ded1_col, value="").alignment = center
             ws.cell(row=ri, column=pay1_col, value=1900).alignment = center
@@ -459,11 +460,6 @@ class ScheduleExportView(generics.ListAPIView):
                 row=ri, column=out1_col,
                 value=f"={get_column_letter(pay1_col)}{ri}*{get_column_letter(total1_col)}{ri}-{get_column_letter(ded1_col)}{ri}",
             ).alignment = center
-            total2_col = summary2_start + 0
-            pct2_col = summary2_start + 1
-            pay2_col = summary2_start + 2
-            ded2_col = summary2_start + 3
-            out2_col = summary2_start + 4
             ws.cell(row=ri, column=total2_col, value=(total_16_end or "")).alignment = center
             ws.cell(row=ri, column=pct2_col, value="").alignment = center
             ws.cell(row=ri, column=pay2_col, value=1900).alignment = center
@@ -476,7 +472,57 @@ class ScheduleExportView(generics.ListAPIView):
                     f"-{get_column_letter(ded2_col)}{ri}"
                 ),
             ).alignment = center
+            return ri
+
+        def write_employee_total_row(ri, payout_row_nums):
+            ws.cell(row=ri, column=1, value="Итого").font = total_font
+            ws.cell(row=ri, column=1).alignment = left
+            for c in range(1, last_col + 1):
+                cell = ws.cell(row=ri, column=c)
+                cell.border = thin_border
+            refs1 = ",".join(f"{get_column_letter(out1_col)}{r}" for r in payout_row_nums)
+            refs2 = ",".join(f"{get_column_letter(out2_col)}{r}" for r in payout_row_nums)
+            c1 = ws.cell(row=ri, column=out1_col, value=f"=SUM({refs1})")
+            c1.alignment = center
+            c1.font = total_font
+            c1.fill = total_fill
+            c2 = ws.cell(row=ri, column=out2_col, value=f"=SUM({refs2})")
+            c2.alignment = center
+            c2.font = total_font
+            c2.fill = total_fill
             return ri + 1
+
+        def write_user_row(ri, user_row, i_user):
+            u = user_row["user"]
+            full_name = f"{u.last_name or ''} {u.first_name or ''}".strip() or u.username
+            phone = (getattr(u, "phone_number", "") or "").strip()
+            base_fill = alt_fill if (i_user % 2 == 1) else None
+
+            if getattr(u, "is_universal", False):
+                label = f"{full_name} / {phone} [Универсал]"
+                ri = write_days_row(ri, label, user_row.get("days") or {}, base_fill)
+                return ri + 1
+
+            base_label = f"{full_name} / {phone}"
+            payout_rows = []
+            has_home = any((user_row.get("home_days") or {}).values())
+            if has_home or not user_row.get("subs"):
+                ri = write_days_row(ri, base_label, user_row.get("home_days") or {}, base_fill)
+                payout_rows.append(ri)
+                ri += 1
+
+            for sub_pvz in sorted((user_row.get("subs") or {}).keys()):
+                sub_days = user_row["subs"][sub_pvz]
+                if not any(sub_days.values()):
+                    continue
+                sub_label = f"{base_label} [подмена: {short_pvz_label(sub_pvz)}]"
+                ri = write_days_row(ri, sub_label, sub_days, base_fill)
+                payout_rows.append(ri)
+                ri += 1
+
+            if len(payout_rows) > 1:
+                ri = write_employee_total_row(ri, payout_rows)
+            return ri
 
         for pvz, users_map in grouped.items():
             # Строка ПВЗ — заливка на всю ширину + толстая граница сверху
