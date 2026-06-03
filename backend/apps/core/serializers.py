@@ -16,6 +16,16 @@ class UserNotificationSerializer(serializers.ModelSerializer):
 class AnnouncementCreateSerializer(serializers.Serializer):
     title = serializers.CharField(max_length=200)
     message = serializers.CharField()
+    pvz_addresses = serializers.ListField(
+        child=serializers.CharField(max_length=255),
+        required=False,
+        allow_empty=True,
+    )
+    user_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        required=False,
+        allow_empty=True,
+    )
 
 
 class FeedbackSerializer(serializers.ModelSerializer):

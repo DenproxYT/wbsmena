@@ -462,8 +462,8 @@ async function loadUsers() {
 }
 {% endif %}
 
-// Загрузить график
-async function loadSchedule() {
+// Загрузить график (preserveFilters — не сбрасывать выбранный день при live-обновлении)
+async function loadSchedule(preserveFilters) {
   const month = document.getElementById('monthFilter').value;
   let userId = null;
   let pvzAddress = null;
@@ -495,8 +495,10 @@ async function loadSchedule() {
     if (res.ok) {
       const data = await res.json();
       currentSchedule = Array.isArray(data) ? data : [];
-      selectedDayFilter = null;
-      selectedPvzFilter = null;
+      if (!preserveFilters) {
+        selectedDayFilter = null;
+        selectedPvzFilter = null;
+      }
       renderCalendar();
       renderTable();
       updateScheduleSummary();
@@ -1214,6 +1216,21 @@ function showAlert(message, type) {
     setTimeout(() => alertDiv.remove(), 300);
   }, 3000);
 }
+
+document.addEventListener('wb-schedule-changed', function (e) {
+  const monthEl = document.getElementById('monthFilter');
+  if (!monthEl || typeof loadSchedule !== 'function') return;
+  const month = monthEl.value;
+  const detail = (e && e.detail) || {};
+  if (!month || !detail.year) {
+    loadSchedule(true);
+    return;
+  }
+  const parts = month.split('-').map(Number);
+  if (detail.year === parts[0] && detail.month === parts[1]) {
+    loadSchedule(true);
+  }
+});
 
 </script>
 

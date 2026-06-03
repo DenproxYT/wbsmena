@@ -1,11 +1,16 @@
+import queue
+
 from rest_framework import permissions, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import generics
 from django.contrib.auth import get_user_model
+from django.http import StreamingHttpResponse
 from django.utils import timezone
 
 from apps.accounts.views import is_accounts_admin
+from .realtime import subscribe, unsubscribe, format_sse
+from .notification_service import resolve_recipient_users, deliver_announcement
 from .models import SiteAnnouncement, UserNotification, Feedback
 from .serializers import (
     UserNotificationSerializer,
@@ -61,8 +66,34 @@ class NotificationMarkAllReadView(APIView):
         return Response({'detail': 'ok'})
 
 
+class EventStreamView(APIView):
+    """SSE: мгновенные уведомления и обновления графика."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user_id = request.user.id
+
+        def stream():
+            q = subscribe(user_id)
+            try:
+                yield ': connected\n\n'
+                while True:
+                    try:
+                        event = q.get(timeout=20)
+                        yield format_sse(event['type'], event.get('data'))
+                    except queue.Empty:
+                        yield ': ping\n\n'
+            finally:
+                unsubscribe(user_id, q)
+
+        response = StreamingHttpResponse(stream(), content_type='text/event-stream')
+        response['Cache-Control'] = 'no-cache, no-transform'
+        response['X-Accel-Buffering'] = 'no'
+        return response
+
+
 class AnnouncementBroadcastView(APIView):
-    """Администратор отправляет уведомление всем активным сотрудникам."""
+    """Администратор отправляет уведомление (всем, по ПВЗ или выбранным людям)."""
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
@@ -75,16 +106,11 @@ class AnnouncementBroadcastView(APIView):
             message=ser.validated_data['message'],
             created_by=request.user,
         )
-        users = User.objects.filter(is_active=True).exclude(
-            role__in=('administrator', 'owner')
+        users = resolve_recipient_users(
+            pvz_addresses=ser.validated_data.get('pvz_addresses'),
+            user_ids=ser.validated_data.get('user_ids'),
         )
-        if not users.exists():
-            users = User.objects.filter(is_active=True)
-        deliveries = [
-            UserNotification(user=u, announcement=announcement)
-            for u in users
-        ]
-        UserNotification.objects.bulk_create(deliveries, ignore_conflicts=True)
+        deliveries = deliver_announcement(announcement, users)
         return Response({
             'id': announcement.id,
             'recipients': len(deliveries),

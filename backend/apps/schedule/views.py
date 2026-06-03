@@ -19,6 +19,7 @@ from .period_utils import (
     get_visible_months_for_user,
     ensure_period,
 )
+from .signals_schedule import emit_schedule_changed
 
 User = get_user_model()
 
@@ -150,20 +151,21 @@ class ScheduleListCreateView(generics.ListCreateAPIView):
         
         if not is_schedule_admin(user):
             pvz_address = resolve_schedule_pvz_for_user(user, pvz)
-            serializer.save(user=user, pvz_address=pvz_address)
+            instance = serializer.save(user=user, pvz_address=pvz_address)
         else:
             user_id = self.request.data.get('user')
             if user_id:
                 try:
                     target_user = User.objects.get(id=user_id)
                     pvz_address = resolve_schedule_pvz_for_user(target_user, pvz)
-                    serializer.save(user=target_user, pvz_address=pvz_address)
+                    instance = serializer.save(user=target_user, pvz_address=pvz_address)
                 except User.DoesNotExist:
                     pvz_address = resolve_schedule_pvz_for_user(user, pvz)
-                    serializer.save(user=user, pvz_address=pvz_address)
+                    instance = serializer.save(user=user, pvz_address=pvz_address)
             else:
                 pvz_address = resolve_schedule_pvz_for_user(user, pvz)
-                serializer.save(user=user, pvz_address=pvz_address)
+                instance = serializer.save(user=user, pvz_address=pvz_address)
+        emit_schedule_changed(instance.date)
 
 
 class ScheduleRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
@@ -178,7 +180,9 @@ class ScheduleRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
 
     def perform_destroy(self, instance):
         self._assert_can_write(instance.date)
+        schedule_date = instance.date
         instance.delete()
+        emit_schedule_changed(schedule_date)
 
     def perform_update(self, serializer):
         d = serializer.validated_data.get('date', serializer.instance.date)
@@ -189,7 +193,7 @@ class ScheduleRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
         
         if not is_schedule_admin(user):
             pvz_address = resolve_schedule_pvz_for_user(user, pvz)
-            serializer.save(user=user, pvz_address=pvz_address)
+            instance = serializer.save(user=user, pvz_address=pvz_address)
         else:
             user_id = self.request.data.get('user')
             if user_id:
@@ -197,9 +201,10 @@ class ScheduleRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
                 target = target_user
             pvz_address = resolve_schedule_pvz_for_user(target, pvz)
             if user_id:
-                serializer.save(user=target_user, pvz_address=pvz_address)
+                instance = serializer.save(user=target_user, pvz_address=pvz_address)
             else:
-                serializer.save(pvz_address=pvz_address)
+                instance = serializer.save(pvz_address=pvz_address)
+        emit_schedule_changed(instance.date)
 
 
 class ScheduleExportView(generics.ListAPIView):
@@ -317,9 +322,15 @@ class ScheduleExportView(generics.ListAPIView):
             cell.alignment = center
             cell.fill = header_fill
 
-        # Группируем: обычные — по ПВЗ; универсалы — один раз в отдельном блоке.
+        def employee_home_pvz(user):
+            if getattr(user, "is_universal", False):
+                return None
+            return (getattr(user, "pvz_address", "") or "").strip() or "Без ПВЗ"
+
+        # Обычные сотрудники — один раз по «домашнему» ПВЗ (все смены суммируются, подмены в примечании).
         grouped = {}
         grouped_universal = {}
+        staff_by_user = {}
         for s in queryset:
             user_key = s.user_id
             u = s.user
@@ -327,10 +338,20 @@ class ScheduleExportView(generics.ListAPIView):
                 grouped_universal.setdefault(user_key, {"user": u, "days": {}})
                 grouped_universal[user_key]["days"][s.date.day] = float(s.shifts or 0)
                 continue
-            pvz = s.pvz_address or "Без ПВЗ"
-            grouped.setdefault(pvz, {})
-            grouped[pvz].setdefault(user_key, {"user": u, "days": {}})
-            grouped[pvz][user_key]["days"][s.date.day] = float(s.shifts or 0)
+            home_pvz = employee_home_pvz(u)
+            sched_pvz = (s.pvz_address or "").strip()
+            row = staff_by_user.setdefault(
+                user_key,
+                {"user": u, "days": {}, "substitute_pvzs": set()},
+            )
+            day = s.date.day
+            row["days"][day] = row["days"].get(day, 0) + float(s.shifts or 0)
+            if sched_pvz and sched_pvz != home_pvz:
+                row["substitute_pvzs"].add(sched_pvz)
+
+        for user_key, user_row in staff_by_user.items():
+            home_pvz = employee_home_pvz(user_row["user"])
+            grouped.setdefault(home_pvz, {})[user_key] = user_row
 
         row_idx = 6
         last_col = summary2_start + 4
@@ -343,6 +364,12 @@ class ScheduleExportView(generics.ListAPIView):
                 label = f"{full_name} / {phone} [Универсал]"
             else:
                 label = f"{full_name} / {phone}"
+                subs = user_row.get("substitute_pvzs") or set()
+                if subs:
+                    short_parts = []
+                    for p in sorted(subs):
+                        short_parts.append(re.sub(r"^ЧИТА[_\s]*", "", p or "", flags=re.I).strip() or p)
+                    label += f" [подмена: {', '.join(short_parts)}]"
             base_fill = alt_fill if (i_user % 2 == 1) else None
             ws.cell(row=ri, column=1, value=label).alignment = left
             for day in range(1, days_in_month + 1):
@@ -1057,7 +1084,7 @@ class HouseholdSupplyExportView(APIView):
             col = 5
             for item in items:
                 ws.cell(row=row, column=col, value=item or "").alignment = left
-                check_cell = ws.cell(row=row, column=col + 1, value="")
+                check_cell = ws.cell(row=row, column=col + 1, value="☐")
                 check_cell.alignment = center
                 check_cell.fill = check_fill
                 check_cell.border = border

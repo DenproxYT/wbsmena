@@ -2,10 +2,10 @@
 {% block title %}Уведомления — Смена WB{% endblock %}
 {% block content %}
 <div class="row justify-content-center fade-in">
-  <div class="col-md-8">
+  <div class="col-lg-9">
     <div class="card card-shadow p-4">
       <h3 class="mb-2"><i class="bi bi-megaphone text-primary"></i> Рассылка сотрудникам</h3>
-      <p class="text-muted">Сообщение появится у всех активных сотрудников в колокольчике уведомлений.</p>
+      <p class="text-muted">Сообщение сразу появится в колокольчике у выбранных получателей. Если никого не выбрать — уйдёт всем активным сотрудникам.</p>
       <div class="d-flex flex-wrap gap-2 mb-3">
         <button type="button" class="btn btn-sm btn-outline-secondary" onclick="fillPreset('schedule')">Заполнить график</button>
         <button type="button" class="btn btn-sm btn-outline-secondary" onclick="fillPreset('open')">График открыт</button>
@@ -19,7 +19,32 @@
           <label class="form-label">Текст</label>
           <textarea class="form-control" id="nMessage" rows="4" required></textarea>
         </div>
-        <button type="submit" class="btn btn-primary"><i class="bi bi-send"></i> Отправить всем</button>
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <label class="form-label">Пункты (ПВЗ)</label>
+            <p class="small text-muted mb-2">Можно выбрать несколько. Пусто — не фильтровать по пункту.</p>
+            <div class="border rounded p-2" style="max-height: 200px; overflow-y: auto;">
+              {% for pvz in pvz_list %}
+              <div class="form-check">
+                <input class="form-check-input n-pvz" type="checkbox" value="{{ pvz }}" id="pvz_{{ forloop.counter }}">
+                <label class="form-check-label small" for="pvz_{{ forloop.counter }}">{{ pvz }}</label>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Конкретные сотрудники</label>
+            <p class="small text-muted mb-2">Можно выбрать несколько. Пусто — не фильтровать по людям.</p>
+            <div class="border rounded p-2" style="max-height: 200px; overflow-y: auto;" id="nUsersBox">
+              <div class="text-muted small py-2">Загрузка списка...</div>
+            </div>
+          </div>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+          <button type="submit" class="btn btn-primary"><i class="bi bi-send"></i> Отправить</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" onclick="clearRecipients()">Сбросить получателей</button>
+          <span class="text-muted small" id="nRecipientHint">Получатели: все активные сотрудники</span>
+        </div>
       </form>
       <div id="nMsg" class="mt-3"></div>
     </div>
@@ -35,20 +60,72 @@ function fillPreset(kind) {
     document.getElementById('nMessage').value = 'Администратор открыл график — можно проставлять смены.';
   }
 }
+function clearRecipients() {
+  document.querySelectorAll('.n-pvz').forEach(el => { el.checked = false; });
+  document.querySelectorAll('.n-user').forEach(el => { el.checked = false; });
+  updateRecipientHint();
+}
+function selectedPvz() {
+  return Array.from(document.querySelectorAll('.n-pvz:checked')).map(el => el.value);
+}
+function selectedUserIds() {
+  return Array.from(document.querySelectorAll('.n-user:checked')).map(el => parseInt(el.value, 10)).filter(Boolean);
+}
+function updateRecipientHint() {
+  const pvz = selectedPvz();
+  const users = selectedUserIds();
+  const hint = document.getElementById('nRecipientHint');
+  if (!pvz.length && !users.length) {
+    hint.textContent = 'Получатели: все активные сотрудники';
+  } else {
+    const parts = [];
+    if (pvz.length) parts.push('ПВЗ: ' + pvz.length);
+    if (users.length) parts.push('люди: ' + users.length);
+    hint.textContent = 'Получатели: ' + parts.join(', ');
+  }
+}
+async function loadEmployeesForBroadcast() {
+  const box = document.getElementById('nUsersBox');
+  try {
+    const res = await fetch('/api/accounts/');
+    if (!res.ok) throw new Error('load failed');
+    const users = await res.json();
+    const staff = users.filter(u => u.is_active !== false && !['administrator', 'owner'].includes(u.role || ''));
+    if (!staff.length) {
+      box.innerHTML = '<div class="text-muted small">Нет сотрудников</div>';
+      return;
+    }
+    box.innerHTML = staff.map(u => {
+      const name = ([u.last_name, u.first_name].filter(Boolean).join(' ') || u.username);
+      const pvz = u.pvz_address ? ' <span class="text-muted">(' + u.pvz_address + ')</span>' : '';
+      return '<div class="form-check"><input class="form-check-input n-user" type="checkbox" value="' + u.id + '" id="nu_' + u.id + '">' +
+        '<label class="form-check-label small" for="nu_' + u.id + '">' + name + pvz + '</label></div>';
+    }).join('');
+    box.querySelectorAll('.n-user').forEach(el => el.addEventListener('change', updateRecipientHint));
+  } catch (e) {
+    box.innerHTML = '<div class="text-danger small">Не удалось загрузить сотрудников</div>';
+  }
+}
+document.querySelectorAll('.n-pvz').forEach(el => el.addEventListener('change', updateRecipientHint));
+loadEmployeesForBroadcast();
+
 document.getElementById('broadcastForm').addEventListener('submit', async function(e) {
   e.preventDefault();
+  const body = {
+    title: document.getElementById('nTitle').value.trim(),
+    message: document.getElementById('nMessage').value.trim(),
+    pvz_addresses: selectedPvz(),
+    user_ids: selectedUserIds()
+  };
   const res = await fetch('/api/core/notifications/broadcast/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-CSRFToken': window.getCSRF() },
-    body: JSON.stringify({
-      title: document.getElementById('nTitle').value.trim(),
-      message: document.getElementById('nMessage').value.trim()
-    })
+    body: JSON.stringify(body)
   });
   const data = await res.json().catch(() => ({}));
   const el = document.getElementById('nMsg');
   if (res.ok) {
-    el.innerHTML = '<div class="alert alert-success">Отправлено сотрудникам: ' + (data.recipients || 0) + '</div>';
+    el.innerHTML = '<div class="alert alert-success">Отправлено: ' + (data.recipients || 0) + ' получател(ей)</div>';
   } else {
     el.innerHTML = '<div class="alert alert-danger">' + (data.detail || JSON.stringify(data)) + '</div>';
   }

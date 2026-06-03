@@ -2,6 +2,7 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    path('events/stream/', views.EventStreamView.as_view(), name='events-stream'),
     path('notifications/', views.NotificationListView.as_view(), name='notifications-list'),
     path('notifications/unread-count/', views.NotificationUnreadCountView.as_view()),
     path('notifications/<int:pk>/read/', views.NotificationMarkReadView.as_view()),

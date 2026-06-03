@@ -397,12 +397,39 @@
         color: white;
       }
 
-      /* Формы */
+      /* Формы — светлая тема: явный цвет текста (логин/пароль) */
+      [data-bs-theme="light"] .form-control,
+      [data-bs-theme="light"] .form-select,
+      html:not([data-bs-theme="dark"]) .form-control,
+      html:not([data-bs-theme="dark"]) .form-select {
+        background-color: #ffffff;
+        color: #0f172a !important;
+        -webkit-text-fill-color: #0f172a;
+      }
+
+      [data-bs-theme="light"] .form-control::placeholder,
+      html:not([data-bs-theme="dark"]) .form-control::placeholder {
+        color: #64748b;
+        -webkit-text-fill-color: #64748b;
+      }
+
       .form-control, .form-select {
         border-radius: 10px;
         border: 2px solid var(--border-color);
         padding: 0.75rem 1rem;
         transition: all 0.2s ease;
+      }
+
+      .navbar-app .btn-theme-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .navbar-app .nav-item-theme {
+        display: flex;
+        align-items: center;
+        justify-content: center;
       }
 
       .form-control:focus, .form-select:focus {
@@ -653,6 +680,12 @@
 
       [data-bs-theme="dark"] .text-dark {
         color: var(--text-primary) !important;
+      }
+
+      [data-bs-theme="dark"] .badge.bg-white,
+      [data-bs-theme="dark"] .exam-questions-badge {
+        color: #0f172a !important;
+        background-color: #ffffff !important;
       }
 
       [data-bs-theme="dark"] .form-control,
@@ -950,8 +983,8 @@
               </div>
             </li>
             {% else %}
-            <li class="nav-item">
-              <button type="button" class="btn btn-nav-ghost btn-theme-toggle me-1" id="themeToggle" title="Тема" aria-label="Переключить тему">
+            <li class="nav-item nav-item-theme ms-auto me-auto">
+              <button type="button" class="btn btn-nav-ghost btn-theme-toggle" id="themeToggle" title="Тема" aria-label="Переключить тему">
                 <i class="bi bi-moon-stars-fill" id="themeToggleIcon" aria-hidden="true"></i>
               </button>
             </li>
@@ -1035,13 +1068,31 @@
       {% if request.user.is_authenticated %}
       ;(function loadNotifications() {
         let lastNotifCount = null
+        function playNotifBeep() {
+          try {
+            const Ctx = window.AudioContext || window.webkitAudioContext
+            if (!Ctx) return
+            const ctx = new Ctx()
+            const osc = ctx.createOscillator()
+            const gain = ctx.createGain()
+            osc.type = 'sine'
+            osc.frequency.value = 880
+            gain.gain.value = 0.12
+            osc.connect(gain)
+            gain.connect(ctx.destination)
+            osc.start()
+            osc.stop(ctx.currentTime + 0.18)
+            setTimeout(function () { ctx.close() }, 400)
+          } catch (e) {}
+        }
         function playNotifSound() {
+          playNotifBeep()
           const audio = document.getElementById('notifSound')
           if (!audio) return
           audio.currentTime = 0
           audio.play().catch(function () {})
         }
-        async function refreshNotifBadge() {
+        async function refreshNotifBadge(playSound) {
           try {
             const res = await fetch('/api/core/notifications/unread-count/')
             if (!res.ok) return
@@ -1049,11 +1100,18 @@
             const badge = document.getElementById('notifBadge')
             if (!badge) return
             const n = data.count || 0
-            if (lastNotifCount !== null && n > lastNotifCount) playNotifSound()
+            if (playSound && lastNotifCount !== null && n > lastNotifCount) playNotifSound()
             lastNotifCount = n
             badge.textContent = n > 99 ? '99+' : n
             badge.style.display = n > 0 ? 'inline-block' : 'none'
           } catch (e) {}
+        }
+        window.wbOnNotification = function () {
+          refreshNotifBadge(true)
+          loadNotifDropdown()
+        }
+        window.wbOnScheduleChanged = function (detail) {
+          document.dispatchEvent(new CustomEvent('wb-schedule-changed', { detail: detail || {} }))
         }
         async function loadNotifDropdown() {
           const list = document.getElementById('notifList')
@@ -1088,17 +1146,29 @@
           } catch (e) {}
         }
         document.addEventListener('DOMContentLoaded', function() {
-          refreshNotifBadge()
+          refreshNotifBadge(false)
           const dd = document.getElementById('notifDropdown')
           if (dd) dd.addEventListener('show.bs.dropdown', loadNotifDropdown)
           const ra = document.getElementById('notifReadAll')
           if (ra) ra.addEventListener('click', async function(ev) {
             ev.preventDefault()
             await fetch('/api/core/notifications/read-all/', { method: 'POST', headers: { 'X-CSRFToken': window.getCSRF() } })
-            refreshNotifBadge()
+            refreshNotifBadge(false)
             loadNotifDropdown()
           })
-          setInterval(refreshNotifBadge, 60000)
+          setInterval(function () { refreshNotifBadge(true) }, 15000)
+          if (typeof EventSource !== 'undefined') {
+            const es = new EventSource('/api/core/events/stream/')
+            es.addEventListener('notification', function () {
+              if (window.wbOnNotification) window.wbOnNotification()
+            })
+            es.addEventListener('schedule_changed', function (ev) {
+              let detail = {}
+              try { detail = JSON.parse(ev.data || '{}') } catch (e) {}
+              if (window.wbOnScheduleChanged) window.wbOnScheduleChanged(detail)
+            })
+            es.onerror = function () { /* браузер переподключится */ }
+          }
         })
       })()
       {% endif %}
