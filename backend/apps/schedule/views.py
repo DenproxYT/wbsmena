@@ -107,6 +107,16 @@ def _resolve_user_from_text(raw_value: str):
     return best if best_score >= 2 else None
 
 
+def assert_can_write_schedule(request, schedule_date):
+    if isinstance(schedule_date, str):
+        schedule_date = date_type.fromisoformat(schedule_date[:10])
+    ok, msg = check_schedule_write_allowed(
+        request.user, schedule_date, is_schedule_admin(request.user)
+    )
+    if not ok:
+        raise PermissionDenied(msg)
+
+
 class ScheduleListCreateView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = ScheduleSerializer
@@ -137,13 +147,7 @@ class ScheduleListCreateView(generics.ListCreateAPIView):
         return queryset.order_by('-date', 'user__username')
 
     def _assert_can_write(self, schedule_date):
-        if isinstance(schedule_date, str):
-            schedule_date = date_type.fromisoformat(schedule_date[:10])
-        ok, msg = check_schedule_write_allowed(
-            self.request.user, schedule_date, is_schedule_admin(self.request.user)
-        )
-        if not ok:
-            raise PermissionDenied(msg)
+        assert_can_write_schedule(self.request, schedule_date)
 
     def perform_create(self, serializer):
         self._assert_can_write(serializer.validated_data['date'])
@@ -200,7 +204,7 @@ class ScheduleRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
         return Schedule.objects.filter(user=user)
 
     def perform_destroy(self, instance):
-        self._assert_can_write(instance.date)
+        assert_can_write_schedule(self.request, instance.date)
         from apps.core.notification_service import broadcast_to_users
         from .period_utils import ensure_period as _ensure_period
 
@@ -230,7 +234,7 @@ class ScheduleRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
 
     def perform_update(self, serializer):
         d = serializer.validated_data.get('date', serializer.instance.date)
-        self._assert_can_write(d)
+        assert_can_write_schedule(self.request, d)
         user = self.request.user
         pvz = self.request.data.get('pvz_address', '').strip()
         target = serializer.instance.user
