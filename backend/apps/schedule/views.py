@@ -10,6 +10,7 @@ from datetime import datetime, date as date_type
 from calendar import monthrange
 from rest_framework.exceptions import PermissionDenied
 from decimal import Decimal, InvalidOperation
+from django.db.models import Max
 import re
 from .models import Schedule, HouseholdSupplyRequest
 from .serializers import ScheduleSerializer, HouseholdSupplyRequestSerializer
@@ -151,21 +152,41 @@ class ScheduleListCreateView(generics.ListCreateAPIView):
         
         if not is_schedule_admin(user):
             pvz_address = resolve_schedule_pvz_for_user(user, pvz)
-            instance = serializer.save(user=user, pvz_address=pvz_address)
+            schedule = serializer.save(user=user, pvz_address=pvz_address)
         else:
             user_id = self.request.data.get('user')
             if user_id:
                 try:
                     target_user = User.objects.get(id=user_id)
                     pvz_address = resolve_schedule_pvz_for_user(target_user, pvz)
-                    instance = serializer.save(user=target_user, pvz_address=pvz_address)
+                    schedule = serializer.save(user=target_user, pvz_address=pvz_address)
                 except User.DoesNotExist:
                     pvz_address = resolve_schedule_pvz_for_user(user, pvz)
-                    instance = serializer.save(user=user, pvz_address=pvz_address)
+                    schedule = serializer.save(user=user, pvz_address=pvz_address)
             else:
                 pvz_address = resolve_schedule_pvz_for_user(user, pvz)
-                instance = serializer.save(user=user, pvz_address=pvz_address)
-        emit_schedule_changed(instance.date)
+                schedule = serializer.save(user=user, pvz_address=pvz_address)
+
+        emit_schedule_changed(schedule.date)
+
+        from apps.core.notification_service import broadcast_to_users
+        from .period_utils import ensure_period as _ensure_period
+
+        period = _ensure_period(schedule.date.year, schedule.date.month)
+        period.updated_by = self.request.user
+        period.save()
+
+        if schedule.user and schedule.user.is_active and schedule.user != self.request.user:
+            label = schedule.date.strftime('%d.%m.%Y')
+            broadcast_to_users(
+                title=f'Смена обновлена: {label}',
+                message=(
+                    f'На {label} изменены смены: {schedule.shifts}. '
+                    f'ПВЗ: {(schedule.pvz_address or "").strip() or "—"}.'
+                ),
+                users=[schedule.user],
+                created_by=self.request.user,
+            )
 
 
 class ScheduleRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
@@ -180,9 +201,32 @@ class ScheduleRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
 
     def perform_destroy(self, instance):
         self._assert_can_write(instance.date)
+        from apps.core.notification_service import broadcast_to_users
+        from .period_utils import ensure_period as _ensure_period
+
+        schedule_user = instance.user
         schedule_date = instance.date
+        schedule_shifts = instance.shifts
+        schedule_pvz_address = instance.pvz_address
+
+        period = _ensure_period(schedule_date.year, schedule_date.month)
+        period.updated_by = self.request.user
+        period.save()
+
         instance.delete()
         emit_schedule_changed(schedule_date)
+
+        if schedule_user and schedule_user.is_active and schedule_user != self.request.user:
+            label = schedule_date.strftime('%d.%m.%Y')
+            broadcast_to_users(
+                title=f'Смена удалена: {label}',
+                message=(
+                    f'На {label} удалена смена: {schedule_shifts}. '
+                    f'ПВЗ: {(schedule_pvz_address or "").strip() or "—"}.'
+                ),
+                users=[schedule_user],
+                created_by=self.request.user,
+            )
 
     def perform_update(self, serializer):
         d = serializer.validated_data.get('date', serializer.instance.date)
@@ -193,7 +237,7 @@ class ScheduleRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
         
         if not is_schedule_admin(user):
             pvz_address = resolve_schedule_pvz_for_user(user, pvz)
-            instance = serializer.save(user=user, pvz_address=pvz_address)
+            schedule = serializer.save(user=user, pvz_address=pvz_address)
         else:
             user_id = self.request.data.get('user')
             if user_id:
@@ -201,10 +245,30 @@ class ScheduleRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
                 target = target_user
             pvz_address = resolve_schedule_pvz_for_user(target, pvz)
             if user_id:
-                instance = serializer.save(user=target_user, pvz_address=pvz_address)
+                schedule = serializer.save(user=target_user, pvz_address=pvz_address)
             else:
-                instance = serializer.save(pvz_address=pvz_address)
-        emit_schedule_changed(instance.date)
+                schedule = serializer.save(pvz_address=pvz_address)
+
+        emit_schedule_changed(schedule.date)
+
+        from apps.core.notification_service import broadcast_to_users
+        from .period_utils import ensure_period as _ensure_period
+
+        period = _ensure_period(schedule.date.year, schedule.date.month)
+        period.updated_by = self.request.user
+        period.save()
+
+        if schedule.user and schedule.user.is_active and schedule.user != self.request.user:
+            label = schedule.date.strftime('%d.%m.%Y')
+            broadcast_to_users(
+                title=f'Смена обновлена: {label}',
+                message=(
+                    f'На {label} изменены смены: {schedule.shifts}. '
+                    f'ПВЗ: {(schedule.pvz_address or "").strip() or "—"}.'
+                ),
+                users=[schedule.user],
+                created_by=self.request.user,
+            )
 
 
 class ScheduleExportView(generics.ListAPIView):
@@ -1022,6 +1086,52 @@ class SchedulePeriodToggleView(APIView):
 
         from .period_utils import _period_dict
         return Response(_period_dict(period))
+
+
+class ScheduleRealtimeMetaView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        try:
+            year = int(request.query_params.get('date__year') or 0)
+            month = int(request.query_params.get('date__month') or 0)
+        except (TypeError, ValueError):
+            return Response({'detail': 'Некорректная дата'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if year < 2000 or month < 1 or month > 12:
+            return Response({'detail': 'Некорректная дата'}, status=status.HTTP_400_BAD_REQUEST)
+
+        admin = is_schedule_admin(request.user)
+
+        schedule_qs = Schedule.objects.select_related('user').filter(
+            date__year=year,
+            date__month=month,
+        )
+        if not admin:
+            schedule_qs = schedule_qs.filter(user=request.user)
+        else:
+            user_id = request.query_params.get('user')
+            pvz_address = request.query_params.get('pvz_address')
+            if user_id:
+                schedule_qs = schedule_qs.filter(user_id=user_id)
+            if pvz_address and pvz_address.strip():
+                schedule_qs = schedule_qs.filter(pvz_address=pvz_address.strip())
+
+        schedule_updated_at = schedule_qs.aggregate(m=Max('updated_at')).get('m')
+
+        period = ensure_period(year, month)
+        period_updated_at = period.updated_at
+
+        schedule_ts = int(schedule_updated_at.timestamp() * 1000) if schedule_updated_at else 0
+        period_ts = int(period_updated_at.timestamp() * 1000) if period_updated_at else 0
+        latest_ts = max(schedule_ts, period_ts)
+
+        return Response({
+            'latest_version': latest_ts,
+            'schedule_updated_at': schedule_updated_at.isoformat() if schedule_updated_at else None,
+            'period_updated_at': period_updated_at.isoformat() if period_updated_at else None,
+            'is_open': bool(period.is_open),
+        })
 
 
 class HouseholdSupplyRequestListCreateView(generics.ListCreateAPIView):

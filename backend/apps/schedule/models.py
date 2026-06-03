@@ -65,6 +65,7 @@ class Schedule(models.Model):
     shifts = models.DecimalField('Смены', max_digits=4, decimal_places=2, default=0.0)
     comment = models.TextField('Комментарий', blank=True)
     pvz_address = models.CharField('ПВЗ', max_length=255)
+    updated_at = models.DateTimeField('Обновлено', auto_now=True)
 
     class Meta:
         unique_together = ("user", "date")

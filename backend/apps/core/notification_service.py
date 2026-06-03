@@ -57,3 +57,15 @@ def broadcast_to_employees(title: str, message: str, created_by=None, pvz_addres
     users = resolve_recipient_users(pvz_addresses=pvz_addresses, user_ids=user_ids)
     deliver_announcement(announcement, users)
     return announcement, users
+
+
+def broadcast_to_users(*, title: str, message: str, users, created_by=None):
+    """Уведомление выбранным пользователям (например, при изменении смены)."""
+    announcement = SiteAnnouncement.objects.create(
+        title=title,
+        message=message,
+        created_by=created_by,
+    )
+    user_list = list(users)
+    deliver_announcement(announcement, user_list)
+    return announcement
